@@ -11,6 +11,8 @@
     - the notes window stays above a maximized Chrome window
     - clicking the notes window does give it focus (it is not click-through)
     - the global shortcut hides and shows the same single window
+    - clicking the tray icon hides and shows it (reported for information; locating the
+      icon depends on the Windows version)
     - launching the app a second time does not create a second window
     - Alt+F4 hides to the tray instead of quitting
 
@@ -123,6 +125,40 @@ function Chord([string]$combo) {
 function TypeText([string]$text) {
   foreach ($ch in $text.ToUpper().ToCharArray()) { [Native]::keybd_event([byte][char]$ch, 0, 0, [UIntPtr]::Zero); [Native]::keybd_event([byte][char]$ch, 0, 0x2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40 }
   Start-Sleep -Milliseconds 400
+}
+
+# Locate the app's notification-area (tray) icon with UI Automation. Returns its screen
+# rectangle, or $null. Looks in the visible tray first, then opens the overflow flyout.
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+function FindTrayIcon([string]$tooltip) {
+  $automation = [System.Windows.Automation.AutomationElement]
+  $scope = [System.Windows.Automation.TreeScope]
+  $byName = New-Object System.Windows.Automation.PropertyCondition($automation::NameProperty, $tooltip)
+  $search = {
+    foreach ($className in @("Shell_TrayWnd", "NotifyIconOverflowWindow", "TopLevelWindowForOverflowXamlIsland", "Xaml_WindowedPopupClass")) {
+      $hostCondition = New-Object System.Windows.Automation.PropertyCondition($automation::ClassNameProperty, $className)
+      foreach ($shellWindow in $automation::RootElement.FindAll($scope::Children, $hostCondition)) {
+        $icon = $shellWindow.FindFirst($scope::Descendants, $byName)
+        if ($icon -and -not $icon.Current.BoundingRectangle.IsEmpty) { return $icon.Current.BoundingRectangle }
+      }
+    }
+    return $null
+  }
+  $rect = & $search
+  if ($rect) { return $rect }
+  # Not in the visible tray: open "Show hidden icons" and look again.
+  $tray = $automation::RootElement.FindFirst($scope::Children, (New-Object System.Windows.Automation.PropertyCondition($automation::ClassNameProperty, "Shell_TrayWnd")))
+  if (-not $tray) { return $null }
+  foreach ($button in $tray.FindAll($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($automation::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))) {
+    if ($button.Current.Name -match "hidden icons|Notification Chevron" -or $button.Current.AutomationId -match "SystemTrayIcon|NotifyChevron") {
+      $b = $button.Current.BoundingRectangle
+      Click ([int]($b.X + $b.Width / 2)) ([int]($b.Y + $b.Height / 2))
+      Start-Sleep -Milliseconds 900
+      return (& $search)
+    }
+  }
+  return $null
 }
 
 $AppExe = (Resolve-Path $AppExe).Path
@@ -247,6 +283,28 @@ try {
   Check "Exactly one notes window exists" ((FindWindows "^Trading Notes$" $appName).Count -eq 1)
   Shot "08-shown-again"
 
+  # ---------------------------------------------------------------- tray icon
+  # Informational: finding another app's tray icon depends on the Windows version and on
+  # whether the icon sits in the overflow area.
+  try {
+    $icon = FindTrayIcon "Trading Notes"
+    if ($icon) {
+      $ix = [int]($icon.X + $icon.Width / 2); $iy = [int]($icon.Y + $icon.Height / 2)
+      Click $ix $iy
+      $trayHid = WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000
+      Check "Clicking the tray icon hides the notes" ([bool]$trayHid) "" $false
+      Shot "08b-hidden-by-tray"
+      $icon = FindTrayIcon "Trading Notes"
+      if ($icon) { Click ([int]($icon.X + $icon.Width / 2)) ([int]($icon.Y + $icon.Height / 2)) }
+      $trayShown = WaitFor { if ([Native]::IsWindowVisible($notes)) { $true } } 4000
+      Check "Clicking the tray icon shows the same notes window again" ([bool]$trayShown) "" $false
+      Check "Still exactly one notes window after tray clicks" ((FindWindows "^Trading Notes$" $appName).Count -eq 1) "" $false
+    } else {
+      Check "Tray icon located for a click test" $false "the icon could not be found through UI Automation on this Windows version" $false
+    }
+  } catch { Check "Tray icon click test" $false "$_" $false }
+  if (-not [Native]::IsWindowVisible($notes)) { Chord $Shortcut; Start-Sleep -Milliseconds 800 }
+
   # ---------------------------------------------------------------- second launch, close button
   $second = Start-Process -FilePath $AppExe -PassThru
   $exited = $second.WaitForExit(15000)
@@ -277,5 +335,5 @@ finally {
 }
 
 Say ""
-Say ("{0} checks, {1} failed. Not covered here: clicking the tray icon itself (it calls the same show/hide code as the shortcut)." -f $results.Count, $failed)
+Say ("{0} checks, {1} failed. Lines marked INFO are reported but do not fail the run." -f $results.Count, $failed)
 if ($failed -gt 0) { exit 1 }

@@ -10,3 +10,4 @@ playwright-report/
 .env
 .env.*
 tests/e2e/shots/
+out-preview/
