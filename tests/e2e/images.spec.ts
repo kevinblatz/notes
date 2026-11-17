@@ -329,3 +329,50 @@ test('pasting from a website keeps structure but not scripts, remote images or f
   expect(JSON.stringify((await storedNotes(app))[0]!.content)).not.toMatch(/javascript|bold"/)
   await ctx.quit()
 })
+
+test('Esc closes the selection bubble row before the note; Ctrl+Enter in a caption logs the note', async () => {
+  const ctx = await launch({ size: { width: 960, height: 1000 } })
+  const { page, app } = ctx
+
+  // Select text, open the link row in the bubble, start typing, then Esc: only the row closes.
+  await clickEmptySpace(page)
+  await page.keyboard.type('Read the session notes')
+  await page.keyboard.press('Control+a')
+  const bubble = page.getByRole('toolbar', { name: 'Selection formatting' })
+  await expect(bubble).toBeVisible()
+  await bubble.getByRole('button', { name: 'Link' }).click()
+  const address = bubble.getByRole('textbox', { name: 'Link address' })
+  await expect(address).toBeVisible()
+  await address.fill('https://exam')
+  await page.keyboard.press('Escape')
+  await expect(address).toBeHidden()
+  await expect(focusView(page)).toBeVisible()
+  await expect(editorBody(page)).toHaveText('Read the session notes')
+  // The same for the colour row.
+  await page.keyboard.press('Control+a')
+  await bubble.getByRole('button', { name: 'Text color' }).click()
+  await expect(bubble.getByRole('group', { name: 'Text color' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(bubble.getByRole('group', { name: 'Text color' })).toBeHidden()
+  await expect(focusView(page)).toBeVisible()
+  // With nothing else open, Esc returns to the board and the note is kept.
+  await editorBody(page).click()
+  await page.keyboard.press('Escape')
+  await expect(focusView(page)).toBeHidden()
+  await expect(notes(page)).toHaveCount(1)
+
+  // A caption is being typed: Ctrl+Enter logs the note in one press, caption included.
+  await clickEmptySpace(page)
+  await copyImageToClipboard(app, RED)
+  await page.keyboard.press('Control+v')
+  await waitForImages(page, '.image-node img', 1)
+  await page.locator('.image-node img').click()
+  const caption = page.locator('.image-caption')
+  await caption.click()
+  await page.keyboard.type('Entry on the retest')
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+  await expect(notes(page).nth(1).locator('figcaption')).toHaveText('Entry on the retest')
+  expect((await storedNotes(app)).some((n) => JSON.stringify(n.content).includes('Entry on the retest'))).toBe(true)
+  await ctx.quit()
+})

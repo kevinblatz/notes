@@ -14,6 +14,15 @@ describe('dockBounds', () => {
     expect(dockBounds(upperLeft.workArea, 'right')).toEqual({ x: -609, y: -1024, width: 609, height: 1024 })
   })
 
+  it('keeps the minimum width and stays on screen on a narrow or portrait monitor', () => {
+    // 1080x1920 portrait at 150 % = 720 px wide: half would be 360, below the 420 minimum.
+    const portrait = { x: 1920, y: 0, width: 720, height: 1240 }
+    expect(dockBounds(portrait, 'right')).toEqual({ x: 1920 + 720 - 420, y: 0, width: 420, height: 1240 })
+    expect(dockBounds(portrait, 'left')).toEqual({ x: 1920, y: 0, width: 420, height: 1240 })
+    // Narrower than the minimum itself: use what there is.
+    expect(dockBounds({ x: 0, y: 0, width: 300, height: 600 }, 'right')).toEqual({ x: 0, y: 0, width: 300, height: 600 })
+  })
+
   it('splits odd widths without a gap or overlap', () => {
     const wa = { x: 0, y: 0, width: 1367, height: 700 }
     const l = dockBounds(wa, 'left')

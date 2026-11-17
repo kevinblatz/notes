@@ -49,7 +49,7 @@ interface TestHandle {
   }
   windows: { toggle: () => void; isShown: () => boolean; reconcileDisplays: () => void; dockTo: (side: 'left' | 'right') => void; status: () => unknown }
   shortcuts: { status: () => { accelerator: string; registered: boolean; error: string | null } }
-  testHooks: { failSaves: boolean }
+  testHooks: { failSaves: boolean; quitChoice: 'ask' | 'keep' | 'quit' }
   quit: () => Promise<void>
 }
 export type { TestHandle }

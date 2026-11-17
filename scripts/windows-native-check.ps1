@@ -135,11 +135,13 @@ Add-Type -AssemblyName UIAutomationTypes
 function FindTrayIcon([string]$tooltip) {
   $automation = [System.Windows.Automation.AutomationElement]
   $scope = [System.Windows.Automation.TreeScope]
-  $shellIds = @(Get-Process -Name explorer, ShellExperienceHost -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+  # The icon lives in a Windows shell window (which one depends on the Windows version), so
+  # every top-level window is searched except the app's own, which carries the same name.
+  $appIds = @(Get-Process -Name $appName -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
   $search = {
     foreach ($top in $automation::RootElement.FindAll($scope::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
       try {
-        if ($shellIds -notcontains $top.Current.ProcessId) { continue }
+        if ($appIds -contains $top.Current.ProcessId) { continue }
         foreach ($element in $top.FindAll($scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
           $name = $element.Current.Name
           # Exact match only: the taskbar button of the same app is named "<title> - 1 running window".
@@ -161,9 +163,11 @@ function FindTrayIcon([string]$tooltip) {
       $b = $current.BoundingRectangle
       if (-not $b.IsEmpty) {
         Click ([int]($b.X + $b.Width / 2)) ([int]($b.Y + $b.Height / 2))
-        Start-Sleep -Milliseconds 1200
+        Start-Sleep -Milliseconds 1800
         $rect = & $search
         if ($rect) { return $rect }
+        $classes = @($automation::RootElement.FindAll($scope::Children, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { try { $_.Current.ClassName + "(" + $_.Current.Name + ")" } catch { } })
+        Say ("  (tray search: top-level windows after opening hidden icons: " + (($classes | Select-Object -First 40) -join "; ") + ")")
       }
     }
   }

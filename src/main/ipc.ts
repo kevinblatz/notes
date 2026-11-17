@@ -71,7 +71,7 @@ export interface IpcContext {
   applyPreferences: (previous: Preferences, next: Preferences) => void
   quit: () => void
   /** Test-only switches; all false in normal use. */
-  testHooks: { failSaves: boolean }
+  testHooks: { failSaves: boolean; quitChoice: 'ask' | 'keep' | 'quit' }
 }
 
 export function registerIpc(context: IpcContext): void {
@@ -80,6 +80,8 @@ export function registerIpc(context: IpcContext): void {
   // closed in between, so the file is never held open while the user decides (on Windows an
   // open file cannot be moved, renamed or deleted).
   let pendingImport: { token: string; filePath: string } | null = null
+  /** Backup files written by this run; the only paths "Show file" may reveal. */
+  const revealable = new Set<string>()
 
   const appInfo = (): AppInfo => ({
     version: app.getVersion(),
@@ -209,6 +211,7 @@ export function registerIpc(context: IpcContext): void {
     try {
       await windows.requestFlush(1500)
       const summary = await exportBackup(library, chosen.filePath, app.getVersion())
+      revealable.add(summary.path)
       return {
         ok: true,
         path: summary.path,
@@ -266,6 +269,7 @@ export function registerIpc(context: IpcContext): void {
     try {
       await windows.requestFlush(1500)
       const result = await importBackup(library, reader, mode, { appVersion: app.getVersion() })
+      if (result.safetyBackupPath) revealable.add(result.safetyBackupPath)
       if (mode === 'replace') {
         const next = library.getPreferences()
         // A restored shortcut may be taken on this machine; keep the working one in that case.
@@ -292,8 +296,9 @@ export function registerIpc(context: IpcContext): void {
 
   handle(IPC.showInFolder, (payload) => {
     const target = z.string().max(4000).parse(payload)
-    // Only reveal files this app wrote: exported backups and the automatic safety copies.
-    if (target.toLowerCase().endsWith(`.${BACKUP_EXTENSION}`)) shell.showItemInFolder(target)
+    // Only files this app itself wrote during this run can be revealed: the exported backup
+    // and the automatic safety copies. The window cannot make Explorer open any other path.
+    if (revealable.has(target)) shell.showItemInFolder(target)
   })
 
   handle(IPC.edit, (payload, event) => {
@@ -308,9 +313,10 @@ export function registerIpc(context: IpcContext): void {
     else contents.redo()
   })
 
-  ipcMain.on(IPC.flushDone, (event, token: unknown) => {
+  ipcMain.on(IPC.flushDone, (event, token: unknown, saved: unknown) => {
     if (event.sender !== windows.window?.webContents || typeof token !== 'string') return
-    windows.confirmFlush(token)
+    // Anything other than an explicit "false" counts as saved (nothing was pending).
+    windows.confirmFlush(token, saved !== false)
   })
 
 }

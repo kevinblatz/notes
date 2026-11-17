@@ -42,7 +42,7 @@ export function App() {
     void initialize()
     const unsubscribe = [
       // The main process asks for pending edits to be written before hiding or quitting.
-      api.on('flush-request', ({ token }) => void flushAll().finally(() => api.flushDone(token))),
+      api.on('flush-request', ({ token }) => void flushAll().then((saved) => api.flushDone(token, saved))),
       api.on('shortcut-status', (status) => setState({ shortcut: status })),
       api.on('window-status', (status) => setState({ windowStatus: status })),
       api.on('preferences-changed', (next) => setState({ prefs: next }))

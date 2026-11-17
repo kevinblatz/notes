@@ -45,12 +45,19 @@ const MIN_VISIBLE_HEIGHT = 120
 /** Height of the draggable title region; part of it must be reachable. */
 const TITLE_REGION = 32
 
-/** Half of the usable work area, never covering the taskbar. Odd widths give the extra pixel to the left half. */
+/**
+ * Half of the usable work area, never covering the taskbar. Odd widths give the extra pixel
+ * to the left half. On a monitor too narrow for two readable halves (a portrait or heavily
+ * scaled display) the window keeps its minimum width and stays flush with its own edge of the
+ * screen instead of hanging off it.
+ */
 export function dockBounds(workArea: Rect, side: DockSide): Rect {
-  const leftWidth = Math.ceil(workArea.width / 2)
-  const rightWidth = workArea.width - leftWidth
-  if (side === 'left') return { x: workArea.x, y: workArea.y, width: leftWidth, height: workArea.height }
-  return { x: workArea.x + leftWidth, y: workArea.y, width: rightWidth, height: workArea.height }
+  const leftHalf = Math.ceil(workArea.width / 2)
+  const half = side === 'left' ? leftHalf : workArea.width - leftHalf
+  const width = Math.max(half, Math.min(MIN_WIDTH, workArea.width))
+  const height = Math.max(workArea.height, Math.min(MIN_HEIGHT, workArea.height))
+  const x = side === 'left' ? workArea.x : workArea.x + workArea.width - width
+  return { x, y: workArea.y, width, height }
 }
 
 export function intersection(a: Rect, b: Rect): Rect | null {

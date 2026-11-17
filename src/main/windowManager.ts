@@ -27,6 +27,7 @@ import {
 import type { Library } from './store/library'
 
 export type ShowMode = 'focus' | 'inactive' | 'hidden'
+export type FlushOutcome = 'saved' | 'failed' | 'timeout' | 'unavailable'
 
 export interface WindowManagerOptions {
   library: Library
@@ -40,6 +41,13 @@ export interface WindowManagerOptions {
   allowDevTools: boolean
 }
 
+/** How long after a monitor change window moves are attributed to Windows rather than to the user. */
+const DISPLAY_SETTLE_MS = 1500
+
+/** Equal within a couple of pixels, to absorb rounding at fractional display scale factors. */
+const rectsNear = (a: Rect, b: Rect): boolean =>
+  Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2 && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2
+
 const toInfo = (display: Display): DisplayInfo => ({
   id: display.id,
   bounds: display.bounds,
@@ -51,10 +59,13 @@ export class WindowManager {
   private win: BrowserWindow | null = null
   private dock: DockSide | 'custom' = 'right'
   private quitting = false
-  private programmaticMoveUntil = 0
+  /** The bounds the app itself last gave the window; while the window still has them it has not been moved by hand. */
+  private lastApplied: Rect | null = null
+  /** When monitors last changed. Moves that Windows makes in response are not the user's. */
+  private displaysChangedAt = 0
   private saveTimer: NodeJS.Timeout | null = null
   private displayTimer: NodeJS.Timeout | null = null
-  private flushWaiters = new Map<string, () => void>()
+  private flushWaiters = new Map<string, (saved: boolean) => void>()
   private flushCounter = 0
 
   constructor(private readonly options: WindowManagerOptions) {}
@@ -135,6 +146,10 @@ export class WindowManager {
     }
     win.on('show', reassertTopmost)
     win.on('restore', reassertTopmost)
+    // Work-area changes are skipped while maximized; catch up once the user restores the window.
+    win.on('unmaximize', () => {
+      if (this.dock !== 'custom') this.scheduleDisplayCheck()
+    })
 
     const displaysChanged = (): void => this.scheduleDisplayCheck()
     screen.on('display-added', displaysChanged)
@@ -180,10 +195,9 @@ export class WindowManager {
   private applyBounds(bounds: Rect): void {
     const win = this.window
     if (!win) return
-    this.programmaticMoveUntil = Date.now() + 600
-    if (win.isMaximized()) win.unmaximize()
     win.setBounds(bounds as Rectangle)
     if (!rectsEqual(win.getBounds(), bounds)) win.setBounds(bounds as Rectangle)
+    this.lastApplied = win.getNormalBounds()
   }
 
   private currentDisplay(): DisplayInfo {
@@ -208,11 +222,15 @@ export class WindowManager {
   private detectDock(): void {
     const win = this.window
     if (!win || win.isMinimized()) return
-    if (Date.now() < this.programmaticMoveUntil) return
+    // While monitors are changing, Windows moves and resizes windows itself. That is not the
+    // user un-docking the notes; reconcileDisplays() decides where the window belongs.
+    if (this.displayTimer || Date.now() - this.displaysChangedAt < DISPLAY_SETTLE_MS) return
     const bounds = win.getNormalBounds()
+    // Still exactly where the app put it: nothing was moved by hand, whatever Windows rounded.
+    if (rectsEqual(bounds, this.lastApplied)) return
     const display = this.currentDisplay()
-    if (rectsEqual(bounds, dockBounds(display.workArea, 'right'))) this.dock = 'right'
-    else if (rectsEqual(bounds, dockBounds(display.workArea, 'left'))) this.dock = 'left'
+    if (rectsNear(bounds, dockBounds(display.workArea, 'right'))) this.dock = 'right'
+    else if (rectsNear(bounds, dockBounds(display.workArea, 'left'))) this.dock = 'left'
     else this.dock = 'custom'
   }
 
@@ -238,12 +256,20 @@ export class WindowManager {
     const win = this.window
     if (!win) return
     this.dock = side
+    // Only an explicit request to dock takes the window out of the maximized state.
+    if (win.isMaximized()) win.unmaximize()
     this.applyBounds(dockBounds(this.currentDisplay().workArea, side))
     this.persistState()
     this.options.onStatusChange()
   }
 
   private scheduleDisplayCheck(): void {
+    this.displaysChangedAt = Date.now()
+    // A move caused by this display change must not be classified before the check below runs.
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
     if (this.displayTimer) clearTimeout(this.displayTimer)
     this.displayTimer = setTimeout(() => {
       this.displayTimer = null
@@ -258,7 +284,10 @@ export class WindowManager {
    */
   reconcileDisplays(): void {
     const win = this.window
-    if (!win || win.isMinimized()) return
+    // A maximized window already fills its work area, and Windows keeps it that way. It is
+    // left alone: un-maximizing it here would change (and on Windows could show or activate)
+    // the window without anyone asking.
+    if (!win || win.isMinimized() || win.isMaximized()) return
     const displays = this.displays()
     if (displays.length === 0) return
     const bounds = win.getNormalBounds()
@@ -360,29 +389,32 @@ export class WindowManager {
   }
 
   /**
-   * Ask the window to write pending edits and wait until it confirms (or the timeout passes).
-   * Resolves true when the window confirmed.
+   * Ask the window to write pending edits and wait for its answer.
+   *   saved        everything typed so far is on disk
+   *   failed       the window tried and the write failed (the note still shows "Not saved")
+   *   timeout      the window did not answer in time
+   *   unavailable  there is no loaded window, so there is nothing to write
    */
-  requestFlush(timeoutMs: number): Promise<boolean> {
+  requestFlush(timeoutMs: number): Promise<FlushOutcome> {
     const win = this.window
-    if (!win || win.webContents.isDestroyed() || win.webContents.isLoading()) return Promise.resolve(false)
+    if (!win || win.webContents.isDestroyed() || win.webContents.isLoading()) return Promise.resolve('unavailable')
     const token = `flush-${++this.flushCounter}`
-    return new Promise<boolean>((resolve) => {
+    return new Promise<FlushOutcome>((resolve) => {
       const timer = setTimeout(() => {
         this.flushWaiters.delete(token)
-        resolve(false)
+        resolve('timeout')
       }, timeoutMs)
-      this.flushWaiters.set(token, () => {
+      this.flushWaiters.set(token, (saved) => {
         clearTimeout(timer)
         this.flushWaiters.delete(token)
-        resolve(true)
+        resolve(saved ? 'saved' : 'failed')
       })
       this.send('flush-request', { token })
     })
   }
 
-  confirmFlush(token: string): void {
-    this.flushWaiters.get(token)?.()
+  confirmFlush(token: string, saved: boolean): void {
+    this.flushWaiters.get(token)?.(saved)
   }
 
   /** Let the window actually close; used only on Quit. */
@@ -391,8 +423,9 @@ export class WindowManager {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer)
       this.saveTimer = null
-      this.detectDock()
     }
+    // Always classify at quit, so a move made in the last moment is remembered.
+    this.detectDock()
     this.persistState()
   }
 }

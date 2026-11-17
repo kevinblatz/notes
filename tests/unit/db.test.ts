@@ -151,10 +151,23 @@ describe('NotesDb', () => {
     lib.purge([id(2)])
     expect(lib.listLive().map((n) => n.id)).toEqual([id(2)])
 
-    // Startup housekeeping removes images no note refers to, and nothing else.
+    // Startup housekeeping gives an unused image a grace period (it may be on the clipboard,
+    // cut from one note to be pasted into another), then removes it, and nothing else.
     const orphan = lib.importImage({ bytes: makePng(2, 2, [1, 2, 3]), name: null, width: 2, height: 2, preview: null })
-    expect(lib.collectGarbage().removed).toBe(1)
-    expect(lib.getAttachment(orphan.id)).toBeNull()
+    const day = 24 * 60 * 60 * 1000
+    expect(lib.collectGarbage(1_000_000)).toEqual({ removed: 0, waiting: 1 })
+    expect(lib.collectGarbage(1_000_000 + 13 * day)).toEqual({ removed: 0, waiting: 1 })
+    expect(lib.getAttachment(orphan.id)).not.toBeNull()
+    // Pasted into a note in the meantime: no longer an orphan, and the clock is forgotten.
+    lib.createNote({ id: id(3), title: null, content: { type: 'doc', content: [{ type: 'noteImage', attrs: { attachmentId: orphan.id } }] }, tags: [], placement: atEnd })
+    expect(lib.collectGarbage(1_000_000 + 30 * day)).toEqual({ removed: 0, waiting: 0 })
+    // Unused again and left that way past the grace period: removed.
+    lib.trashNote(id(3))
+    lib.db.purgeNotes([id(3)])
+    const again = lib.importImage({ bytes: makePng(2, 2, [4, 5, 6]), name: null, width: 2, height: 2, preview: null })
+    expect(lib.collectGarbage(2_000_000_000)).toEqual({ removed: 0, waiting: 1 })
+    expect(lib.collectGarbage(2_000_000_000 + 15 * day)).toEqual({ removed: 1, waiting: 0 })
+    expect(lib.getAttachment(again.id)).toBeNull()
     expect(lib.getAttachment(a.id)).not.toBeNull()
     lib.close()
   })

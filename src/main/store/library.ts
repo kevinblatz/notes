@@ -23,6 +23,9 @@ import type { SavedWindowState } from '@shared/windowBounds'
 import { AttachmentStore, type StoreImageInput } from './attachments'
 import { NotesDb, toAttachmentMeta, type AttachmentRow, type DbOptions } from './db'
 
+/** How long an image may stay unused by any note before startup housekeeping deletes it. */
+export const ORPHAN_GRACE_MS = 14 * 24 * 60 * 60 * 1000
+
 export interface StoredSession {
   openNoteId: string | null
   cleanExit: boolean
@@ -123,17 +126,30 @@ export class Library {
   }
 
   /**
-   * Startup housekeeping: remove half-written temp files and images that no note refers to.
-   * Runs only at startup, when there is no editor undo history that could bring an image back.
+   * Startup housekeeping: remove half-written temp files, and images that no note has
+   * referred to for a while. An image is not removed the first time it is seen unused: it
+   * may have been cut to the clipboard to be pasted into another note, possibly after a
+   * restart. It is removed only once it has stayed unused for the whole grace period.
    */
-  collectGarbage(): { removed: number } {
+  collectGarbage(now: number = Date.now(), graceMs: number = ORPHAN_GRACE_MS): { removed: number; waiting: number } {
     this.attachments.sweepTempFiles()
-    const orphans = this.db.unreferencedAttachments()
-    for (const orphan of orphans) {
-      this.db.deleteAttachment(orphan.id)
-      this.attachments.remove(orphan)
+    const stored = this.db.getSetting<Record<string, unknown>>('orphanedAttachments')
+    const since: Record<string, unknown> = stored && typeof stored === 'object' ? stored : {}
+    const stillWaiting: Record<string, number> = {}
+    let removed = 0
+    for (const orphan of this.db.unreferencedAttachments()) {
+      const first = since[orphan.id]
+      const firstSeen = typeof first === 'number' && Number.isFinite(first) ? first : now
+      if (now - firstSeen >= graceMs) {
+        this.db.deleteAttachment(orphan.id)
+        this.attachments.remove(orphan)
+        removed++
+      } else {
+        stillWaiting[orphan.id] = firstSeen
+      }
     }
-    return { removed: orphans.length }
+    this.db.setSetting('orphanedAttachments', stillWaiting)
+    return { removed, waiting: Object.keys(stillWaiting).length }
   }
 
   // ---- settings

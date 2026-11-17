@@ -114,8 +114,12 @@ function PinnedIndex() {
   const notes = useStore((s) => s.notes)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   const pinned = pins.map((id) => notes[id]).filter((note): note is Note => !!note)
+  const [sorting, setSorting] = useState(false)
+  // While an entry is being moved, Esc belongs to the move (it cancels it), not to the palette.
+  useEscape(sorting, () => undefined, { passthrough: true })
 
   const onDragEnd = (event: DragEndEvent): void => {
+    setSorting(false)
     const { active, over } = event
     if (!over || active.id === over.id) return
     const from = pins.indexOf(String(active.id))
@@ -127,7 +131,7 @@ function PinnedIndex() {
     return <p className="palette-empty">Nothing pinned yet. Hover a note and choose Pin to keep a rule or setup one step away.</p>
   }
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={() => setSorting(true)} onDragCancel={() => setSorting(false)} onDragEnd={onDragEnd}>
       <SortableContext items={pinned.map((n) => n.id)} strategy={verticalListSortingStrategy}>
         <div className="pin-list" data-testid="pin-list">
           {pinned.map((note) => (

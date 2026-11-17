@@ -47,7 +47,8 @@ export interface TnApi {
   openDataFolder(): Promise<boolean>
   showInFolder(path: string): Promise<void>
   edit(command: EditCommand): Promise<void>
-  flushDone(token: string): void
+  /** Answer a flush request: `saved` is false when the pending edit could not be written. */
+  flushDone(token: string, saved: boolean): void
   on<K extends keyof MainEvents>(name: K, listener: (payload: MainEvents[K]) => void): () => void
 }
 

@@ -26,6 +26,7 @@ import {
 import { useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { FONT_KEYS, FONT_LABELS, FONT_SIZES, fontVar, HIGHLIGHT_COLORS, highlightVar, INK_COLORS, inkVar, safeLinkHref } from '@shared/content'
 import { api } from '../../lib/api'
+import { useEscape } from '../../lib/escape'
 import { IconButton, MenuList, Popover, type MenuEntry } from '../ui'
 
 /** Keep the text selection when a control is pressed with the mouse. */
@@ -253,6 +254,11 @@ export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: 
 export function SelectionBubble({ editor }: { editor: Editor }) {
   const state = useFormatState(editor)
   const [row, setRow] = useState<'ink' | 'highlight' | 'link' | null>(null)
+  // Esc closes the open colour or link row first, not the note behind it.
+  useEscape(row !== null, () => {
+    setRow(null)
+    editor.view.focus()
+  })
   const toggle = (next: 'ink' | 'highlight' | 'link') => (): void => setRow((current) => (current === next ? null : next))
   const run = (fn: (chain: ReturnType<Editor['chain']>) => ReturnType<Editor['chain']>) => (): void => {
     fn(editor.chain().focus()).run()

@@ -101,6 +101,8 @@ export function ImageNodeView({ node, updateAttributes, selected, editor }: Node
         maxLength={2000}
         onChange={(event) => updateAttributes({ caption: event.target.value })}
         onKeyDown={(event) => {
+          // Ctrl+Enter logs the note from here too: let it through to the note view.
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) return
           // Keep typing keys in the caption field instead of handing them to the editor.
           event.stopPropagation()
           if (event.key === 'Enter') {

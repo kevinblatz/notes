@@ -196,14 +196,19 @@ export async function revealNote(noteId: string): Promise<void> {
   setState({ panel: null, gearOpen: false, spotlight: { noteId, token: ++spotlightCounter } })
 }
 
-/** Write whatever is pending. Used before the window hides, the app quits, or a backup runs. */
-export async function flushAll(): Promise<void> {
+/**
+ * Write whatever is pending. Used before the window hides, the app quits, or a backup runs.
+ * Resolves false when the note being edited could not be written.
+ */
+export async function flushAll(): Promise<boolean> {
+  let saved = true
   try {
-    await activeSaver?.flush()
+    if (activeSaver) saved = await activeSaver.flush()
     await layoutChain
   } catch {
-    // Errors are already shown by whoever started the write.
+    saved = false
   }
+  return saved
 }
 
 // ---------------------------------------------------------------- layout

@@ -47,7 +47,7 @@ const api: TnApi = {
   openDataFolder: () => ipcRenderer.invoke(IPC.openDataFolder),
   showInFolder: (path: string) => ipcRenderer.invoke(IPC.showInFolder, path),
   edit: (command: EditCommand) => ipcRenderer.invoke(IPC.edit, command),
-  flushDone: (token: string) => ipcRenderer.send(IPC.flushDone, token),
+  flushDone: (token: string, saved: boolean) => ipcRenderer.send(IPC.flushDone, token, saved),
   on: <K extends keyof MainEvents>(name: K, listener: (payload: MainEvents[K]) => void) => {
     let set = listeners.get(name)
     if (!set) {

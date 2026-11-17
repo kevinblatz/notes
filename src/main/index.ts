@@ -80,13 +80,40 @@ async function main(): Promise<void> {
   session.defaultSession.setPermissionCheckHandler(() => false)
   handleAttachmentRequests(lib)
 
+  const testHooks: { failSaves: boolean; quitChoice: 'ask' | 'keep' | 'quit' } = { failSaves: false, quitChoice: 'ask' }
+
   const quit = async (): Promise<void> => {
     if (quitInProgress) return
     quitInProgress = true
     // Give the window a moment to write the edit in progress before the database closes.
-    await windows?.requestFlush(2500)
+    const outcome = (await windows?.requestFlush(2500)) ?? 'unavailable'
+    if (outcome === 'failed') {
+      // The note could not be written. Never drop it silently: bring the notes forward and ask.
+      windows?.show(true)
+      let choice = testHooks.quitChoice
+      if (choice === 'ask') {
+        const win = windows?.window
+        const options = {
+          type: 'warning' as const,
+          buttons: ['Keep editing', 'Quit anyway'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+          title: 'Trading Notes',
+          message: 'The note you are writing could not be saved.',
+          detail: 'If you quit now, what you typed since the last successful save will be lost. Keep editing to try again or to copy the text somewhere safe.'
+        }
+        const answer = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+        choice = answer.response === 1 ? 'quit' : 'keep'
+      }
+      if (choice === 'keep') {
+        quitInProgress = false
+        return
+      }
+    }
     try {
-      lib.setSession({ cleanExit: true })
+      // Only a confirmed write counts as a clean exit; otherwise the next start says so.
+      if (outcome === 'saved' || outcome === 'unavailable') lib.setSession({ cleanExit: true })
     } catch {
       // If this write fails the next start simply reports an unclean exit.
     }
@@ -127,7 +154,6 @@ async function main(): Promise<void> {
     tray?.refresh()
   }
 
-  const testHooks = { failSaves: false }
   registerIpc({ library: lib, windows: manager, shortcuts, session: sessionInfo, applyPreferences, quit: () => void quit(), testHooks })
 
   // Keep the stored preference honest if the startup entry was removed outside the app.
@@ -139,11 +165,17 @@ async function main(): Promise<void> {
   const startMode: ShowMode = process.argv.includes('--hidden') ? 'hidden' : process.argv.includes(AUTOSTART_ARG) ? 'inactive' : 'focus'
   const win = manager.create(startMode)
 
-  // Windows is logging off or shutting down: there is no time to wait, so write what we can.
-  win.on('query-session-end' as 'close', () => void manager.requestFlush(1000))
-  win.on('session-end' as 'close', () => {
+  // Windows is logging off or shutting down: there is no time to ask anything, so write what
+  // we can and record a clean exit only if the window confirmed that everything was saved.
+  let savedBeforeSessionEnd = false
+  win.on('query-session-end', () => {
+    void manager.requestFlush(1000).then((outcome) => {
+      savedBeforeSessionEnd = outcome === 'saved' || outcome === 'unavailable'
+    })
+  })
+  win.on('session-end', () => {
     try {
-      lib.setSession({ cleanExit: true })
+      if (savedBeforeSessionEnd) lib.setSession({ cleanExit: true })
       lib.db.checkpoint()
     } catch {
       // Nothing more can be done this late.

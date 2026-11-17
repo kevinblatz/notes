@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef } from 'react'
 
-const stack: Array<{ run: () => void }> = []
+const stack: Array<{ run: () => void; passthrough: boolean }> = []
 let installed = false
 let openAtPointerDown = false
 
@@ -34,6 +34,9 @@ function install(): void {
       if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return
       const top = stack[stack.length - 1]
       if (!top) return
+      // A pass-through entry marks something that handles Escape itself (a keyboard drag in
+      // progress): the key is left alone and nothing underneath is closed.
+      if (top.passthrough) return
       event.preventDefault()
       event.stopPropagation()
       top.run()
@@ -42,19 +45,20 @@ function install(): void {
   )
 }
 
-export function useEscape(active: boolean, handler: () => void): void {
+export function useEscape(active: boolean, handler: () => void, options: { passthrough?: boolean } = {}): void {
   const latest = useRef(handler)
   latest.current = handler
+  const passthrough = options.passthrough === true
   useEffect(() => {
     if (!active) return
     install()
-    const entry = { run: () => latest.current() }
+    const entry = { run: () => latest.current(), passthrough }
     stack.push(entry)
     return () => {
       const index = stack.indexOf(entry)
       if (index !== -1) stack.splice(index, 1)
     }
-  }, [active])
+  }, [active, passthrough])
 }
 
 /** True while any menu, panel or preview is open above the base view. */
