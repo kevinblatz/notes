@@ -142,7 +142,8 @@ function FindTrayIcon([string]$tooltip) {
         if ($shellIds -notcontains $top.Current.ProcessId) { continue }
         foreach ($element in $top.FindAll($scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
           $name = $element.Current.Name
-          if ($name -and $name.StartsWith($tooltip) -and -not $element.Current.BoundingRectangle.IsEmpty) { return $element.Current.BoundingRectangle }
+          # Exact match only: the taskbar button of the same app is named "<title> - 1 running window".
+          if ($name -eq $tooltip -and -not $element.Current.BoundingRectangle.IsEmpty) { return $element.Current.BoundingRectangle }
         }
       } catch { }
     }
@@ -314,7 +315,7 @@ try {
       $ix = [int]($icon.X + $icon.Width / 2); $iy = [int]($icon.Y + $icon.Height / 2)
       Click $ix $iy
       $trayHid = WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000
-      Check "Clicking the tray icon hides the notes" ([bool]$trayHid) "" $false
+      Check "Clicking the tray icon hides the notes" ([bool]$trayHid) ("clicked at $ix,$iy; minimized: " + [Native]::IsIconic($notes)) $false
       Shot "08b-hidden-by-tray"
       $icon = FindTrayIcon "Trading Notes"
       if ($icon) { Click ([int]($icon.X + $icon.Width / 2)) ([int]($icon.Y + $icon.Height / 2)) }
