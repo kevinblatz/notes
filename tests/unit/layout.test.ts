@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  anchorOf,
   describePosition,
   findNote,
   flattenOrder,
@@ -8,6 +9,7 @@ import {
   liftNote,
   moveNote,
   normalizeLayout,
+  placeByAnchor,
   placementOf,
   removeNote,
   restoreAt,
@@ -201,6 +203,22 @@ describe('trash origin', () => {
     const changed = L(['a'], ['b', 'z'], ['d'])
     expect(shape(restoreAt(changed, 'c', originC, rid))).toEqual([['a'], ['c'], ['b', 'z'], ['d']])
     expect(shape(restoreAt(L(['a']), 'c', null, rid))).toEqual([['a'], ['c']])
+  })
+
+  it('puts one note back by its neighbours without disturbing notes added since', () => {
+    // D was moved up from the bottom of [a],[c],[d]; meanwhile b was restored under a.
+    const anchor = anchorOf(L(['a'], ['c'], ['d']), 'd')!
+    expect(anchor).toEqual({ partnerId: null, slot: 0, previousNoteId: 'c', rowIndex: 2 })
+    expect(shape(placeByAnchor(L(['a'], ['b'], ['d'], ['c']), 'd', anchor, rid))).toEqual([['a'], ['b'], ['c'], ['d']])
+    // A note that was at the top goes back to the top even if rows were inserted since.
+    const top = anchorOf(L(['a'], ['b']), 'a')!
+    expect(shape(placeByAnchor(L(['b'], ['new'], ['a'], ['c']), 'a', top, rid))).toEqual([['a'], ['b'], ['new'], ['c']])
+    // A former pair is re-formed on the same side when the partner is still alone.
+    const paired = anchorOf(L(['x'], ['a', 'b']), 'b')!
+    expect(shape(placeByAnchor(L(['b'], ['x'], ['new'], ['a']), 'b', paired, rid))).toEqual([['x'], ['new'], ['a', 'b']])
+    // The neighbour above is gone: fall back to the old row number, and never lose anything.
+    const orphan = { partnerId: null, slot: 0, previousNoteId: 'gone', rowIndex: 1 }
+    expect(shape(placeByAnchor(L(['a'], ['b'], ['c']), 'c', orphan, rid))).toEqual([['a'], ['c'], ['b']])
   })
 
   it('describes positions for announcements', () => {

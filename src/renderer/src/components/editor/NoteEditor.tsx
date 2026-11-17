@@ -46,7 +46,7 @@ function SaveStatus({ state, onRetry }: { state: SaveState; onRetry: () => void 
   )
 }
 
-function TagRow({ tags, onChange }: { tags: string[]; onChange: (next: string[]) => void }) {
+function TagRow({ tags, onChange, onSubmit }: { tags: string[]; onChange: (next: string[]) => void; onSubmit: () => void }) {
   const [adding, setAdding] = useState(false)
   const [value, setValue] = useState('')
   const notes = useStore((s) => s.notes)
@@ -86,11 +86,15 @@ function TagRow({ tags, onChange }: { tags: string[]; onChange: (next: string[])
             aria-label="New tag"
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
+              if (event.key !== 'Enter') return
+              event.preventDefault()
+              if (event.ctrlKey || event.metaKey) {
+                // Ctrl+Enter keeps whatever was typed as a tag and logs the note.
                 if (value.trim()) add(value)
-                else setAdding(false)
-              }
+                setAdding(false)
+                onSubmit()
+              } else if (value.trim()) add(value)
+              else setAdding(false)
             }}
             onBlur={() => {
               if (value.trim()) add(value)
@@ -317,6 +321,7 @@ export function NoteEditor({ view }: { view: NoteView }) {
           />
           <EditorContent editor={editor} className="focus-editor" />
           <TagRow
+            onSubmit={() => void returnToBoard()}
             tags={tags}
             onChange={(next) => {
               setTags(next)

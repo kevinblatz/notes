@@ -1344,6 +1344,11 @@ kbd {
   font-size: 12px;
   white-space: nowrap;
 }
+.result-tag.is-match {
+  color: var(--ink);
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
 .palette-foot {
   display: flex;
   gap: 16px;

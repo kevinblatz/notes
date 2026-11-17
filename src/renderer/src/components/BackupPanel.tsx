@@ -39,6 +39,8 @@ export function BackupPanel() {
       await flushAll()
       const outcome = await api.exportBackup()
       if (outcome.canceled) return
+      // A new attempt replaces whatever the previous one reported.
+      setExported(null)
       if (!outcome.ok) throw new Error(outcome.error ?? 'The backup could not be written.')
       setExported(outcome)
     })
@@ -79,6 +81,11 @@ export function BackupPanel() {
           <p className="setting-success" role="status">
             Saved {plural(exported.noteCount ?? 0, 'note')} and {plural(exported.attachmentCount ?? 0, 'image')} ({megabytes(exported.byteSize ?? 0)}).{' '}
             <button type="button" className="link-button" onClick={() => exported.path && void api.showInFolder(exported.path)}>Show file</button>
+          </p>
+        ) : null}
+        {exported?.ok && (exported.missingFiles ?? 0) > 0 ? (
+          <p className="setting-warning" role="alert">
+            {plural(exported.missingFiles ?? 0, 'image')} could not be included because {exported.missingFiles === 1 ? 'its file is' : 'their files are'} missing from the notes folder. The notes themselves are in the backup.
           </p>
         ) : null}
       </section>

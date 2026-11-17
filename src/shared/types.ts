@@ -71,6 +71,8 @@ export interface TrashOrigin {
   rowIndex: number
   slot: number
   partnerId: string | null
+  /** Last note of the row that was above it (null = it was in the top row). Absent in older records. */
+  previousNoteId?: string | null
 }
 
 export interface AttachmentMeta {
@@ -214,6 +216,8 @@ export interface ExportResult {
   noteCount?: number
   attachmentCount?: number
   byteSize?: number
+  /** Images a note refers to whose file was missing on disk, so they are not in the backup. */
+  missingFiles?: number
   error?: string
 }
 

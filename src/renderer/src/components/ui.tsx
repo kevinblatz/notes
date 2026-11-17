@@ -96,8 +96,13 @@ export function Popover({ anchor, open, onClose, placement = 'bottom', align = '
       if (ref.current?.contains(target) || anchor?.contains(target)) return
       onClose()
     }
+    const anchoredAt = anchor?.getBoundingClientRect()
     const onScroll = (event: Event): void => {
       if (ref.current?.contains(event.target as Node)) return
+      // Close only when the thing the panel is attached to has actually moved. A menu on the
+      // title bar stays open while the board underneath scrolls.
+      const now = anchor?.getBoundingClientRect()
+      if (anchoredAt && now && Math.abs(now.top - anchoredAt.top) < 2 && Math.abs(now.left - anchoredAt.left) < 2) return
       onClose()
     }
     window.addEventListener('pointerdown', onPointerDown, true)

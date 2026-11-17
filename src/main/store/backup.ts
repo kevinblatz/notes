@@ -147,7 +147,8 @@ export async function exportBackup(library: Library, destPath: string, appVersio
   const data = {
     notes,
     layout: library.db.getLayout(),
-    pins: library.db.getPins(),
+    // Every pin, including those of notes in Trash, so restoring such a note later brings its pin back.
+    pins: library.db.getAllPins(),
     preferences: library.getPreferences()
   }
   zip.addBuffer(Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'), 'manifest.json', { compress: true })
@@ -496,15 +497,16 @@ export async function importBackup(library: Library, reader: BackupReader, mode:
           .map((row) => ({ id: newRowId(), notes: row.notes.map((id) => noteIdMap.get(id) ?? id).filter((id) => addedLive.has(id)) }))
           .filter((row) => row.notes.length > 0)
       }
+      const incomingIds = new Set(incoming.map((n) => n.id))
       if (mode === 'replace') {
         db.replaceLayout(mapped)
-        db.setPins(reader.pins)
+        db.importPins(reader.pins)
         if (reader.preferences !== undefined) library.setPreferences(reader.preferences)
       } else {
         const current = db.getLayout([...addedLive])
         db.replaceLayout({ rows: [...current.rows, ...mapped.rows] })
-        const addedPins = reader.pins.map((id) => noteIdMap.get(id) ?? id).filter((id) => addedLive.has(id))
-        db.setPins([...db.getPins(), ...addedPins])
+        const addedPins = reader.pins.map((id) => noteIdMap.get(id) ?? id).filter((id) => incomingIds.has(id))
+        db.importPins([...db.getAllPins(), ...addedPins])
       }
     })
 
@@ -545,7 +547,7 @@ export function summarize(library: Library, reader: BackupReader): InspectSummar
     noteCount: live.length,
     trashedCount: reader.notes.length - live.length,
     attachmentCount: reader.manifest.attachments.length,
-    pinCount: reader.pins.length,
+    pinCount: reader.pins.filter((id) => live.some((n) => n.id === id)).length,
     missingAttachments: missing,
     overlappingNotes: reader.notes.filter((n) => library.db.getNote(n.id) !== null).length,
     warnings,

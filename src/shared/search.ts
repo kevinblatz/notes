@@ -18,6 +18,8 @@ export interface SearchResult {
   /** Where the snippet text came from. */
   source: 'body' | 'caption' | 'title' | 'tag'
   tags: string[]
+  /** Tags that contain a query word or equal the tag filter; shown first so the match is visible. */
+  matchedTags: string[]
   updatedAt: number
   score: number
 }
@@ -161,6 +163,7 @@ export function searchNotes(notes: Iterable<Note>, query: string, options: Searc
       snippet: snippetIsLabel ? [] : highlight(snippet, tokens),
       source,
       tags: note.tags,
+      matchedTags: note.tags.filter((t) => fold(t) === tagFilter || tokens.some((token) => fold(t).includes(token))),
       updatedAt: note.updatedAt,
       score
     })

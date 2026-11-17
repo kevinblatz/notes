@@ -46,6 +46,7 @@ function toResult(note: Note): SearchResult {
     snippet: note.title && snippet ? [{ text: snippet.length > 150 ? `${snippet.slice(0, 149)}…` : snippet, match: false }] : [],
     source: 'body',
     tags: note.tags,
+    matchedTags: [],
     updatedAt: note.updatedAt,
     score: 0
   }
@@ -80,8 +81,8 @@ function ResultRow({ result, active, pinned, onHover, optionId }: { result: Sear
         ) : null}
       </div>
       <div className="result-meta">
-        {result.tags.slice(0, 3).map((tag) => (
-          <span key={tag} className="result-tag">{tag}</span>
+        {[...result.matchedTags, ...result.tags.filter((tag) => !result.matchedTags.includes(tag))].slice(0, Math.max(3, result.matchedTags.length)).map((tag) => (
+          <span key={tag} className={`result-tag${result.matchedTags.includes(tag) ? ' is-match' : ''}`}>{tag}</span>
         ))}
         <span>{ago(result.updatedAt)}</span>
       </div>
@@ -149,8 +150,11 @@ export function FindPalette({ mode }: { mode: 'find' | 'pins' }) {
 
   useEscape(true, closePanel)
   useFocusTrap(panel, true)
+  // The keyboard goes into the palette as soon as it opens: the search field, or the first
+  // pinned entry (or the Pinned tab when nothing is pinned yet).
   useEffect(() => {
     if (mode === 'find') input.current?.focus()
+    else panel.current?.querySelector<HTMLElement>('.pin-open, [role="tab"][aria-selected="true"]')?.focus()
   }, [mode])
 
   const all = useMemo(() => Object.values(notes), [notes])

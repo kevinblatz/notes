@@ -3,7 +3,7 @@
  * the main process directly.
  */
 import { isNoteEmpty, noteLabel, setTaskChecked } from '@shared/content'
-import { describePosition, findNote, keyboardMove, layoutsEqual, moveNote, type MoveDirection } from '@shared/layout'
+import { anchorOf, describePosition, findNote, keyboardMove, layoutsEqual, moveNote, placeByAnchor, type MoveDirection } from '@shared/layout'
 import type { BoardLayout, Note, Placement, Preferences } from '@shared/types'
 import { api } from '../lib/api'
 import { captureBoardPositions } from '../lib/flip'
@@ -23,7 +23,12 @@ export function setActiveSaver(saver: NoteSaver | null): void {
 
 // ---------------------------------------------------------------- startup
 
-export async function initialize(): Promise<void> {
+/**
+ * Load everything from the main process. `restoreSession` is true only for the first load
+ * after start-up, when the note that was open last time is reopened; a reload after an
+ * import must show the board, not jump back into that note.
+ */
+export async function initialize(restoreSession = true): Promise<void> {
   try {
     const snapshot = await api.loadSnapshot()
     setState({
@@ -38,7 +43,7 @@ export async function initialize(): Promise<void> {
       windowStatus: snapshot.window,
       app: snapshot.app
     })
-    const open = snapshot.session.openNoteId
+    const open = restoreSession ? snapshot.session.openNoteId : null
     if (open && snapshot.notes.some((n) => n.id === open)) {
       setState({
         view: { mode: 'note', noteId: open, isNew: false, placement: null, caret: null, initialFiles: [] },
@@ -53,8 +58,9 @@ export async function initialize(): Promise<void> {
 /** Reload everything after an import replaced or extended the collection. */
 export async function reloadAfterImport(): Promise<void> {
   activeSaver = null
-  setState({ view: { mode: 'board' }, undo: [], preview: null })
-  await initialize()
+  setState({ view: { mode: 'board' }, undo: [], preview: null, recoveredNotice: false })
+  void api.setSession(null)
+  await initialize(false)
 }
 
 // ---------------------------------------------------------------- toasts / announcements
@@ -222,11 +228,14 @@ function pushUndo(entry: UndoEntry): void {
 }
 
 /** Replace the board layout, animating notes to their new places. */
-export function applyLayout(next: BoardLayout, options: { undoLabel?: string; animate?: boolean; persist?: boolean } = {}): void {
+export function applyLayout(next: BoardLayout, options: { undoLabel?: string; movedNoteId?: string; animate?: boolean; persist?: boolean } = {}): void {
   const before = getState().layout
   if (layoutsEqual(before, next)) return
   if (options.animate !== false) captureBoardPositions()
-  if (options.undoLabel) pushUndo({ kind: 'layout', before, label: options.undoLabel })
+  if (options.undoLabel) {
+    const noteId = options.movedNoteId ?? null
+    pushUndo({ kind: 'layout', before, after: next, noteId, anchor: noteId ? anchorOf(before, noteId) : null, label: options.undoLabel })
+  }
   setState({ layout: next })
   if (options.persist !== false) persistLayout(next)
 }
@@ -235,7 +244,7 @@ export function applyLayout(next: BoardLayout, options: { undoLabel?: string; an
 export function dropNote(noteId: string, placement: Placement): void {
   const next = moveNote(getState().layout, noteId, placement, newId)
   if (layoutsEqual(next, getState().layout)) return
-  applyLayout(next, { undoLabel: 'Move' })
+  applyLayout(next, { undoLabel: 'Move', movedNoteId: noteId })
   const label = noteLabelOf(noteId)
   announce(`Moved "${label}" to ${describePosition(next, noteId)}.`)
   toast('Note moved', { action: { label: 'Undo', run: () => void undoLast() }, duration: 5000 })
@@ -248,7 +257,7 @@ export function moveNoteByKeyboard(noteId: string, direction: MoveDirection): vo
     announce(`Cannot move ${direction} from here.`)
     return
   }
-  applyLayout(next, { undoLabel: 'Move' })
+  applyLayout(next, { undoLabel: 'Move', movedNoteId: noteId })
   announce(`Moved to ${describePosition(next, noteId)}.`)
 }
 
@@ -258,11 +267,17 @@ export async function undoLast(): Promise<void> {
   if (!entry) return
   setState({ undo: state.undo.slice(0, -1) })
   if (entry.kind === 'layout') {
-    // The saved layout is repaired against the live notes by the main process, so undoing
-    // an old move after other changes can never resurrect or drop a note.
+    // If the board is exactly as the move left it, restore the earlier arrangement as it was.
+    // If anything has changed since (a note written, deleted or recovered), only the moved
+    // note goes back, next to its old neighbours; every other note stays where it is now.
+    const current = state.layout
+    let target = entry.before
+    if (!layoutsEqual(current, entry.after)) {
+      target = entry.noteId && entry.anchor && findNote(current, entry.noteId) ? placeByAnchor(current, entry.noteId, entry.anchor, newId) : current
+    }
     captureBoardPositions()
-    setState({ layout: entry.before })
-    persistLayout(entry.before)
+    setState({ layout: target })
+    persistLayout(target)
     announce(`${entry.label} undone.`)
   } else {
     await restoreNote(entry.noteId)

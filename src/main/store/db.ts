@@ -504,6 +504,24 @@ export class NotesDb {
     return rows.map((r) => r.note_id)
   }
 
+  /** Every pin in order, including pins of notes that are in Trash (used by backup). */
+  getAllPins(): string[] {
+    return (this.stmt('SELECT note_id FROM pins ORDER BY position').all() as Array<{ note_id: string }>).map((r) => r.note_id)
+  }
+
+  /** Replace the whole pin table with the given order, keeping only IDs of notes that exist (live or trashed). */
+  importPins(ids: unknown): string[] {
+    const known = new Set((this.stmt('SELECT id FROM notes').all() as Array<{ id: string }>).map((r) => r.id))
+    const wanted: string[] = []
+    if (Array.isArray(ids)) for (const id of ids) if (typeof id === 'string' && known.has(id) && !wanted.includes(id)) wanted.push(id)
+    return this.transaction(() => {
+      this.db.exec('DELETE FROM pins')
+      const insert = this.stmt('INSERT INTO pins (note_id, position) VALUES (?, ?)')
+      wanted.forEach((id, position) => insert.run(id, position))
+      return this.getPins()
+    })
+  }
+
   /** Replace the pinned index (order matters). Pins of trashed notes are kept for a later restore. */
   setPins(ids: unknown): string[] {
     const live = new Set(this.liveIds())

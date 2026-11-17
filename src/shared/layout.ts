@@ -237,12 +237,52 @@ export function keyboardMove(layout: BoardLayout, noteId: string, direction: Mov
   return insertNote(lifted, noteId, { kind: 'slot', rowId: neighbour.id, index }, makeRowId)
 }
 
+/** Where a note sat, described by its neighbours rather than by coordinates or row numbers. */
+export interface MoveAnchor {
+  partnerId: string | null
+  slot: number
+  /** Last note of the row above, or null when the note was in the top row. */
+  previousNoteId: string | null
+  rowIndex: number
+}
+
+export function anchorOf(layout: BoardLayout, noteId: string): MoveAnchor | null {
+  const pos = findNote(layout, noteId)
+  if (!pos) return null
+  const above = layout.rows[pos.rowIndex - 1]
+  return {
+    partnerId: pos.row.notes.find((id) => id !== noteId) ?? null,
+    slot: pos.slot,
+    previousNoteId: above ? above.notes[above.notes.length - 1]! : null,
+    rowIndex: pos.rowIndex
+  }
+}
+
+/**
+ * Put one note back where its anchor says, leaving every other note where it is now:
+ * beside its former partner if that note is still alone in a row, otherwise directly below
+ * the note that used to be above it, otherwise at its old row number.
+ */
+export function placeByAnchor(layout: BoardLayout, noteId: string, anchor: MoveAnchor, makeRowId: RowIdFactory): BoardLayout {
+  const base = removeNote(layout, noteId)
+  if (anchor.partnerId) {
+    const partner = findNote(base, anchor.partnerId)
+    if (partner && partner.row.notes.length === 1) {
+      return insertNote(base, noteId, { kind: 'slot', rowId: partner.row.id, index: anchor.slot <= 0 ? 0 : 1 }, makeRowId)
+    }
+  }
+  if (anchor.previousNoteId === null) return insertNote(base, noteId, { kind: 'row', index: 0 }, makeRowId)
+  const above = findNote(base, anchor.previousNoteId)
+  if (above) return insertNote(base, noteId, { kind: 'row', index: above.rowIndex + 1 }, makeRowId)
+  return insertNote(base, noteId, { kind: 'row', index: anchor.rowIndex }, makeRowId)
+}
+
 /** Record where a note sits so a later restore can put it back. */
 export function trashOriginOf(layout: BoardLayout, noteId: string): TrashOrigin | null {
   const pos = findNote(layout, noteId)
   if (!pos) return null
-  const partnerId = pos.row.notes.find((id) => id !== noteId) ?? null
-  return { rowIndex: pos.rowIndex, slot: pos.slot, partnerId }
+  const anchor = anchorOf(layout, noteId)!
+  return { rowIndex: pos.rowIndex, slot: pos.slot, partnerId: anchor.partnerId, previousNoteId: anchor.previousNoteId }
 }
 
 /**
@@ -252,6 +292,9 @@ export function trashOriginOf(layout: BoardLayout, noteId: string): TrashOrigin 
 export function restoreAt(layout: BoardLayout, noteId: string, origin: TrashOrigin | null, makeRowId: RowIdFactory): BoardLayout {
   if (findNote(layout, noteId)) return cloneLayout(layout)
   if (!origin) return insertNote(layout, noteId, { kind: 'row', index: layout.rows.length }, makeRowId)
+  if (origin.previousNoteId !== undefined) {
+    return placeByAnchor(layout, noteId, { partnerId: origin.partnerId, slot: origin.slot, previousNoteId: origin.previousNoteId, rowIndex: origin.rowIndex }, makeRowId)
+  }
   if (origin.partnerId) {
     const partner = findNote(layout, origin.partnerId)
     if (partner && partner.row.notes.length === 1) {

@@ -3,6 +3,7 @@
  * else is view state (which screen is showing, open panels, toasts, undo history).
  */
 import { create } from 'zustand'
+import type { MoveAnchor } from '@shared/layout'
 import { DEFAULT_PREFERENCES, type AppInfo, type BoardLayout, type Note, type Placement, type Preferences, type ShortcutStatus, type WindowStatus } from '@shared/types'
 
 /** Where to put the caret when a note opens: the block and character the user clicked. */
@@ -34,7 +35,7 @@ export interface Toast {
 }
 
 export type UndoEntry =
-  | { kind: 'layout'; before: BoardLayout; label: string }
+  | { kind: 'layout'; before: BoardLayout; after: BoardLayout; noteId: string | null; anchor: MoveAnchor | null; label: string }
   | { kind: 'trash'; noteId: string; label: string }
 
 export interface ImagePreviewState {

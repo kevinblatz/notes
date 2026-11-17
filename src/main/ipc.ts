@@ -76,7 +76,10 @@ export interface IpcContext {
 
 export function registerIpc(context: IpcContext): void {
   const { library, windows, shortcuts } = context
-  let pendingImport: { token: string; reader: BackupReader } | null = null
+  // Only the path is remembered between the preview and the import. The archive itself is
+  // closed in between, so the file is never held open while the user decides (on Windows an
+  // open file cannot be moved, renamed or deleted).
+  let pendingImport: { token: string; filePath: string } | null = null
 
   const appInfo = (): AppInfo => ({
     version: app.getVersion(),
@@ -206,7 +209,14 @@ export function registerIpc(context: IpcContext): void {
     try {
       await windows.requestFlush(1500)
       const summary = await exportBackup(library, chosen.filePath, app.getVersion())
-      return { ok: true, path: summary.path, noteCount: summary.noteCount, attachmentCount: summary.attachmentCount, byteSize: summary.byteSize }
+      return {
+        ok: true,
+        path: summary.path,
+        noteCount: summary.noteCount,
+        attachmentCount: summary.attachmentCount,
+        byteSize: summary.byteSize,
+        missingFiles: summary.missingFiles
+      }
     } catch (error) {
       return { ok: false, error: `The backup could not be written: ${messageOf(error)}` }
     }
@@ -222,13 +232,16 @@ export function registerIpc(context: IpcContext): void {
     })
     const filePath = chosen.filePaths[0]
     if (chosen.canceled || !filePath) return null
-    pendingImport?.reader.close()
     pendingImport = null
     try {
       const reader = await BackupReader.open(filePath)
-      const token = randomUUID()
-      pendingImport = { token, reader }
-      return { token, ...summarize(library, reader) }
+      try {
+        const token = randomUUID()
+        pendingImport = { token, filePath }
+        return { token, ...summarize(library, reader) }
+      } finally {
+        reader.close()
+      }
     } catch (error) {
       return { error: messageOf(error) }
     }
@@ -240,9 +253,16 @@ export function registerIpc(context: IpcContext): void {
       ok: false, mode, added: 0, skipped: 0, copied: 0, attachmentsImported: 0, missingAttachments: 0, safetyBackupPath: null, error
     })
     if (!pendingImport || pendingImport.token !== token) return failed('Choose the backup file again.')
-    const { reader } = pendingImport
+    const { filePath } = pendingImport
     pendingImport = null
     const previous = library.getPreferences()
+    let reader: BackupReader
+    try {
+      // Opened again here, which also re-validates the file in case it changed since the preview.
+      reader = await BackupReader.open(filePath)
+    } catch (error) {
+      return failed(`Nothing was changed. ${messageOf(error)}`)
+    }
     try {
       await windows.requestFlush(1500)
       const result = await importBackup(library, reader, mode, { appVersion: app.getVersion() })
@@ -293,7 +313,6 @@ export function registerIpc(context: IpcContext): void {
     windows.confirmFlush(token)
   })
 
-  app.once('will-quit', () => pendingImport?.reader.close())
 }
 
 function messageOf(error: unknown): string {
