@@ -6,9 +6,9 @@ your computer: no account, no subscription, no network, no AI service.
 
 ## Install
 
-**From a build** (no tools needed): take one of the two files produced by the build
-(`release/` locally, or the *Trading-Notes-Windows* artifact of the *Build and test* workflow
-on GitHub).
+**From a build** (no tools needed): download one of the two files from the repository's
+*Releases* page on GitHub. (Every run of the *Build and test* workflow also attaches them as
+the *Trading-Notes-Windows* artifact.)
 
 | File | Use it when |
 | --- | --- |
@@ -133,12 +133,44 @@ Settings shows this folder and can open it. Uninstalling the app does not delete
 To keep notes somewhere else, set the environment variable `TRADING_NOTES_DATA_DIR` to a folder
 before starting the app.
 
+Screenshots that no note uses any more are kept for 14 days before the app tidies them away,
+so an image you cut from one note can still be pasted into another later.
+
 **What "saved" means.** While you type, a note is written about half a second after you pause,
 and immediately when you log it, hide the window or quit. If the app or Windows stops
 unexpectedly, the next start opens the note you were writing as it was last saved; at most the
 last moment of typing before the stop can be missing. If a save fails (for example the disk is
 full), the note stays open with a "Not saved" message and a *Try again* button, and it never
-claims to be saved.
+claims to be saved. If you choose Quit while a save is failing, the app asks before closing
+instead of dropping the text.
+
+## What has been verified, and what has not
+
+Every push builds the app on a real Windows machine and runs three things there
+(`.github/workflows/build.yml`):
+
+| Check | What it covers |
+| --- | --- |
+| Unit tests | Layout rules (no note is ever lost or overwritten), storage, stale-save rejection, Trash, backup round trip and import validation, search, window placement on made-up monitor arrangements. |
+| Desktop tests | The real app driven through the acceptance checks: writing and autosave, screenshots by paste, drop and file picker, formatting surviving a restart, rearranging, narrow and wide layouts, pins, search, Trash, backup and import, docking, hide and show, drafts surviving hide, quit and a crash, a failed save, an unavailable shortcut, a window left off screen, and performance with 300 notes and 80 screenshots. |
+| Native window check | `scripts/windows-native-check.ps1`, with real mouse and keyboard input against a real Chrome window: the notes are always-on-top and stay put; every click on Chrome gives Chrome the keyboard; the notes never take focus back; typing lands in Chrome; the notes stay above a maximized and a fullscreen Chrome; the global shortcut hides and shows the one window; a second launch does not open a second window; Alt+F4 hides to the tray; the tray icon exists. |
+
+Not verified by automation, so worth a look on your own machine:
+
+- **Clicking the tray icon.** The check confirms the icon is created, but could not locate it
+  in the hidden-icons flyout to click it. It runs the same code as the shortcut.
+- **More than one monitor, and scaling other than 100%.** The placement rules are unit-tested
+  with multi-monitor and scaled arrangements, and the interface was reviewed at 125% and 150%,
+  but the CI machine has a single 1920x1080 screen at 100%. To check: move the notes to a
+  second monitor, quit, start again (they should reopen there); then unplug that monitor
+  (they should move to the main screen).
+- **Start with Windows.** The setting is wired to the Windows login items but was not
+  exercised by a real sign-in.
+- **Windows shutting down while you type.** Handled in code (pending text is written, and the
+  next start is honest about anything that was not), not exercised by a real shutdown.
+
+Known limitations: the app is not code-signed (SmartScreen asks once); search does not read
+text inside screenshots; there is no sync between computers (use Backup and import).
 
 ## Development
 

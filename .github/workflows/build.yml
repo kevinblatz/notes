@@ -4,9 +4,9 @@ name: Build and test
 # there, and runs the native window checks (always-on-top, focus, shortcut) that cannot be
 # verified anywhere else. The installer and portable .exe are attached to each run.
 #
-# To publish downloadable files: run this workflow by hand with "Create a draft release"
-# ticked (Actions tab, Build and test, Run workflow), or push a tag such as v0.1.0. The
-# release is created as a draft, so nothing is public until you choose to publish it.
+# To publish downloadable files: run this workflow by hand with "Create a release" ticked
+# (Actions tab, Build and test, Run workflow), or push a tag such as v0.1.0. The release is
+# a draft unless "Publish" is ticked as well.
 on:
   push:
     branches: [main]
@@ -15,7 +15,11 @@ on:
   workflow_dispatch:
     inputs:
       draft_release:
-        description: Create a draft release with the installer and portable app
+        description: Create a release with the installer and portable app
+        type: boolean
+        default: false
+      publish:
+        description: Publish the release straight away (otherwise it stays a draft)
         type: boolean
         default: false
 
@@ -99,7 +103,7 @@ jobs:
           retention-days: 14
 
   release:
-    name: Draft release
+    name: Release
     needs: windows
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.draft_release)
     runs-on: ubuntu-latest
@@ -114,9 +118,10 @@ jobs:
           name: Trading-Notes-Windows
           path: release
 
-      - name: Create or update the draft release
+      - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ inputs.publish }}
         run: |
           version="$(node -p "require('./package.json').version")"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag="$GITHUB_REF_NAME"; else tag="v$version"; fi
@@ -125,3 +130,4 @@ jobs:
             gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Trading Notes $version" --notes "$notes"
           fi
           gh release upload "$tag" release/*.exe --clobber
+          if [[ "$PUBLISH" == "true" ]]; then gh release edit "$tag" --draft=false --latest; fi
