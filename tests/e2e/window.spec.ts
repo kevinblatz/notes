@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process'
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { clickEmptySpace, editorBody, focusView, storedNotes, windowCount, type TestHandle } from './helpers'
-import { freshDataDir, launch, removeDataDir, ROOT, type Launched, type LaunchOptions } from './launch'
+import { crash, freshDataDir, launch, removeDataDir, ROOT, type Launched, type LaunchOptions } from './launch'
 
 interface Rect { x: number; y: number; width: number; height: number }
 
@@ -351,9 +351,7 @@ test('after an unclean exit the app reopens the note that was open, with a recov
   await openDraft(first.page, 'Saved before the crash')
   await expect(savedStatus(first.page)).toBeVisible()
   live.splice(live.indexOf(first), 1)
-  const closed = first.app.waitForEvent('close')
-  first.app.process().kill('SIGKILL')
-  await closed
+  await crash(first.app)
 
   const ctx = await start({ dataDir: first.dataDir })
   await expect(focusView(ctx.page)).toBeVisible()

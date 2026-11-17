@@ -1,5 +1,5 @@
 /** Settings: only the essentials. Window, shortcut, writing defaults, appearance, backup. */
-import { useEffect, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { acceleratorFromEvent, formatAccelerator } from '@shared/accelerator'
 import { FONT_KEYS, FONT_LABELS, FONT_SIZES } from '@shared/content'
 import { THEME_LABELS, THEMES } from '@shared/preferences'
@@ -22,7 +22,9 @@ function ShortcutRecorder() {
   }
   useEscape(recording, stop)
 
-  useEffect(() => {
+  // A layout effect, so the key listener is in place in the same frame the button changes:
+  // a key pressed immediately after the click is not missed.
+  useLayoutEffect(() => {
     if (!recording) return
     // Release the current shortcut while listening, so pressing it is captured here
     // instead of hiding the window.
