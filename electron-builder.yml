@@ -1,13 +1,33 @@
+# Packaging for Windows. Build with:  npm run package:win
 appId: com.tradingnotes.app
 productName: Trading Notes
+copyright: Trading Notes
 directories:
   output: release
   buildResources: build
 files:
   - out/**/*
+  - "!out/**/*.map"
+  - resources/**/*
   - package.json
 asar: true
+# The tray and window icons are read by Windows from a real file path.
+asarUnpack:
+  - resources/**
+# Everything the app needs is bundled into out/, so no node_modules are shipped and there is
+# nothing native to rebuild (SQLite is built into Electron).
+npmRebuild: false
+# Hardening: the packaged executable cannot be turned into a general-purpose Node runtime or
+# be attached to with a debugger from the command line, and it only loads its own code.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: true
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]
@@ -20,6 +40,11 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Trading Notes
+  uninstallDisplayName: Trading Notes
+  runAfterFinish: true
+  # Uninstalling the app must never delete the notes.
+  deleteAppDataOnUninstall: false
   artifactName: Trading-Notes-Setup-${version}.${ext}
 portable:
   artifactName: Trading-Notes-Portable-${version}.${ext}
+publish: null

@@ -1,0 +1,90 @@
+name: Build and test
+
+# Builds the Windows installer and portable app on a real Windows machine, runs every test
+# there, and runs the native window checks (always-on-top, focus, shortcut) that cannot be
+# verified anywhere else. The installer and portable .exe are attached to each run.
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows build, tests and native checks
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use a full-size desktop
+        shell: pwsh
+        run: |
+          try { Set-DisplayResolution -Width 1920 -Height 1080 -Force } catch { Write-Host "Could not change resolution: $_" }
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests (persistence, backup, layout)
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Package installer and portable app
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Native window checks (always-on-top, focus, shortcut)
+        shell: pwsh
+        run: ./scripts/windows-native-check.ps1 -AppExe "release/win-unpacked/Trading Notes.exe" -OutDir native-check
+
+      - name: Desktop tests on Windows
+        run: npx playwright test
+
+      - name: Upload installer and portable app
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trading-Notes-Windows
+          path: |
+            release/Trading-Notes-Setup-*.exe
+            release/Trading-Notes-Portable-*.exe
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload native check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-window-check
+          path: native-check/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload failed desktop test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
