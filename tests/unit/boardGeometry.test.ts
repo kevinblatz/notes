@@ -107,6 +107,23 @@ describe('hitDrag', () => {
     expect(hitDrag(geo, base, 900, 60, 'x', current)).toEqual({ kind: 'slot', rowId: 'row0', index: 2 })
   })
 
+  it('swaps sides by crossing the partner while paired', () => {
+    // x is the left note of a pair with a; the board is drawn with x as placeholder on the left.
+    const layout = L(['x', 'a'], ['b'])
+    const base = liftNote(layout, 'x')
+    const current: Placement = { kind: 'slot', rowId: 'row0', index: 0 }
+    const geo = measure(layout, true)
+    // Over a, left of its centre: stays on the left. Right of its centre: moves to the right.
+    expect(hitDrag(geo, base, 600, 60, 'x', current)).toEqual({ kind: 'slot', rowId: 'row0', index: 0 })
+    expect(hitDrag(geo, base, 800, 60, 'x', current)).toEqual({ kind: 'slot', rowId: 'row0', index: 1 })
+    // Stacked: decided by the partner's vertical centre instead.
+    const stacked = measure(layout, false)
+    expect(hitDrag(stacked, base, 480, 150, 'x', current)).toEqual({ kind: 'slot', rowId: 'row0', index: 0 })
+    expect(hitDrag(stacked, base, 480, 200, 'x', current)).toEqual({ kind: 'slot', rowId: 'row0', index: 1 })
+    // Moving down onto another row leaves the pair.
+    expect(hitDrag(geo, base, 480, 200, 'x', current)).toEqual({ kind: 'row', index: 2 })
+  })
+
   it('settles: once the preview is drawn, the same pointer position gives the same target', () => {
     // Simulates the live preview loop for many pointer positions, layouts and both widths.
     const layouts = [L(['a'], ['b'], ['x'], ['c']), L(['a', 'b'], ['x'], ['c', 'd']), L(['x', 'a'], ['b'], ['c', 'd']), L(['a'], ['b', 'x'])]

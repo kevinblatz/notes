@@ -198,6 +198,8 @@ export function NoteEditor({ view }: { view: NoteView }) {
     if (editor.isDestroyed) return
     const hinted = positionFromHint(editor.state.doc, view.caret)
     editor.commands.focus(hinted ?? (view.isNew ? 'start' : 'end'), { scrollIntoView: true })
+    // The command above moves keyboard focus on the next frame; do it now as well.
+    editor.view.focus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor])
 

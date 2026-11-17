@@ -161,6 +161,8 @@ export function placementsEqual(a: Placement | null, b: Placement | null): boole
  * shows the dragged note as a placeholder at `current`) and `base`, the layout without it.
  *
  *  - Over the placeholder itself: nothing changes (this is what keeps the preview steady).
+ *  - Over the note the placeholder is paired with: before or after it, by which side of
+ *    that note's centre the pointer is on (so dragging across a partner swaps sides).
  *  - Level with another note, in the left or right side zone: join that note's row on that side.
  *  - Level with another note, in the middle: above or below that note's row, by which half of
  *    the row is nearer.
@@ -180,6 +182,12 @@ export function hitDrag(geometry: BoardGeometry, base: BoardLayout, x: number, y
     const distance = (box: NoteBox): number => (x < box.left ? box.left - x : x > right(box) ? x - right(box) : 0)
     const hovered = level.reduce((best, box) => (distance(box) < distance(best) ? box : best))
     const position = findNote(base, hovered.id)!
+    if (placeholder && hovered.rowId === placeholder.rowId) {
+      // Over the note the placeholder is currently paired with: crossing that note's centre
+      // swaps sides. (Leaving the pair is done by moving out of its row.)
+      const before = geometry.wide ? x < hovered.left + hovered.width / 2 : y < hovered.top + hovered.height / 2
+      return { kind: 'slot', rowId: position.row.id, index: position.slot + (before ? 0 : 1) }
+    }
     const width = Math.max(1, geometry.contentRight - geometry.contentLeft)
     const relative = (x - geometry.contentLeft) / width
     if (relative < SIDE_ZONE) return { kind: 'slot', rowId: position.row.id, index: 0 }

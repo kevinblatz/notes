@@ -86,12 +86,15 @@ export async function dragNote(page: Page, sourceText: string, targetText: strin
   await page.mouse.down()
   await page.mouse.move(from.x + from.width / 2 - 6, from.y + from.height / 2 + 8, { steps: 3 })
   await expect(page.locator('.board.is-dragging')).toBeVisible()
-  // Approach the target in a few passes: the board reflows as the target changes.
-  for (let pass = 0; pass < 4; pass++) {
-    const box = (await noteByText(page, targetText).boundingBox())!
-    await page.mouse.move(box.x + box.width * fx, box.y + box.height * fy, { steps: 6 })
-    await page.waitForTimeout(120)
-  }
+  // Like a person would: pick a spot on the target note, move there, and hold still while
+  // the board reflows around the pointer.
+  const box = (await noteByText(page, targetText).boundingBox())!
+  const x = box.x + box.width * fx
+  const y = box.y + box.height * fy
+  await page.mouse.move(x, y, { steps: 10 })
+  await page.waitForTimeout(150)
+  await page.mouse.move(x + 1, y + 1, { steps: 2 })
+  await page.waitForTimeout(200)
   await page.mouse.up()
   await expect(page.locator('.board.is-dragging')).toHaveCount(0)
   await page.waitForTimeout(250)
