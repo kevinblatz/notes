@@ -1,0 +1,25 @@
+appId: com.tradingnotes.app
+productName: Trading Notes
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+asar: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Trading Notes
+  artifactName: Trading-Notes-Setup-${version}.${ext}
+portable:
+  artifactName: Trading-Notes-Portable-${version}.${ext}
