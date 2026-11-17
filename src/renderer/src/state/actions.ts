@@ -132,7 +132,17 @@ export function noteSaved(note: Note, layout: BoardLayout | null): void {
  * Back / Log note / Ctrl+Enter / Esc. Writes pending edits first. If that write fails the
  * editor stays open with the text intact; nothing is discarded.
  */
-export async function returnToBoard(): Promise<boolean> {
+let returning: Promise<boolean> | null = null
+
+export function returnToBoard(): Promise<boolean> {
+  // Back, Log note, Ctrl+Enter and Esc can arrive together; they share one return.
+  returning ??= leaveNote().finally(() => {
+    returning = null
+  })
+  return returning
+}
+
+async function leaveNote(): Promise<boolean> {
   const state = getState()
   if (state.view.mode !== 'note') return true
   const { noteId } = state.view

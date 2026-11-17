@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { board, boardLabels, clickEmptySpace, collectConsoleErrors, editorBody, focusView, notes, storedNotes, writeNote } from './helpers'
 import { launch, type Launched } from './launch'
 

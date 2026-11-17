@@ -21,6 +21,20 @@ export function removeDataDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true })
 }
 
+const running = new Set<ElectronApplication>()
+
+/** Force-close anything a failed test left running, so it cannot disturb the next test. */
+export async function closeLeftovers(): Promise<void> {
+  for (const app of [...running]) {
+    running.delete(app)
+    try {
+      app.process().kill('SIGKILL')
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
 export interface LaunchOptions {
   dataDir?: string
   env?: Record<string, string>
@@ -42,6 +56,8 @@ export async function launch(options: LaunchOptions = {}): Promise<Launched> {
       ...options.env
     }
   })
+  running.add(app)
+  app.on('close', () => running.delete(app))
   const page = await app.firstWindow()
   await page.waitForSelector('.app[data-ready="true"]')
   if (options.size) await setWindowSize(app, page, options.size.width, options.size.height)

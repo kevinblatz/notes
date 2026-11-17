@@ -137,10 +137,18 @@ export function makePng(width: number, height: number, rgb: [number, number, num
 
 /** Put an image on the system clipboard, as a screenshot tool would. */
 export async function copyImageToClipboard(app: ElectronApplication, png: Buffer): Promise<void> {
-  await app.evaluate(({ clipboard, nativeImage }, base64) => {
+  await app.evaluate(async ({ clipboard, ClipboardItem }, base64) => {
     clipboard.clear()
-    clipboard.writeImage(nativeImage.createFromBuffer(Buffer.from(base64, 'base64')))
+    await clipboard.write([new ClipboardItem({ 'image/png': new Blob([Buffer.from(base64, 'base64')], { type: 'image/png' }) })])
   }, png.toString('base64'))
+}
+
+/** Put rich text on the system clipboard, as copying from a web page would. */
+export async function copyHtmlToClipboard(app: ElectronApplication, html: string, text: string): Promise<void> {
+  await app.evaluate(async ({ clipboard, ClipboardItem }, value) => {
+    clipboard.clear()
+    await clipboard.write([new ClipboardItem({ 'text/html': value.html, 'text/plain': value.text })])
+  }, { html, text })
 }
 
 export async function windowCount(app: ElectronApplication): Promise<number> {

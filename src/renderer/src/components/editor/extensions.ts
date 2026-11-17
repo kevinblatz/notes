@@ -8,6 +8,7 @@ import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Color, FontFamily, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import { Placeholder } from '@tiptap/extensions'
 import type { Node as PMNode } from '@tiptap/pm/model'
+import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { IMAGE_NODE, isValidId, safeLinkHref } from '@shared/content'
@@ -115,6 +116,41 @@ export function buildExtensions(options: { onSubmit: () => void }) {
   ]
 }
 
+/**
+ * Insert one image block at `position` (or at the selection) and leave the caret in the
+ * paragraph after it, so typing or adding another image continues below instead of
+ * replacing the image that was just added.
+ */
+function insertImageNode(editor: Editor, attrs: Record<string, unknown>, position?: number): void {
+  editor
+    .chain()
+    .focus()
+    .command(({ tr, state }) => {
+      const type = state.schema.nodes[IMAGE_NODE]
+      const paragraph = state.schema.nodes.paragraph
+      if (!type || !paragraph) return false
+      const selection = tr.selection
+      // A selected block (for example another image) is kept; the new image goes after it.
+      const reference = position ?? (selection instanceof NodeSelection ? selection.to : selection.from)
+      const at = Math.max(0, Math.min(reference, tr.doc.content.size))
+      // Places the block before/after the current paragraph when the caret is at its edge,
+      // and splits the paragraph when the caret is in the middle of it.
+      tr.replaceRangeWith(at, at, type.create(attrs))
+      let inserted = -1
+      tr.doc.descendants((node, pos) => {
+        if (node.type === type && node.attrs.attachmentId === attrs.attachmentId) inserted = pos
+        return inserted === -1
+      })
+      if (inserted === -1) return true
+      const after = inserted + 1
+      const next = tr.doc.resolve(after).nodeAfter
+      if (!next || !next.isTextblock) tr.insert(after, paragraph.create())
+      tr.setSelection(TextSelection.create(tr.doc, after + 1)).scrollIntoView()
+      return true
+    })
+    .run()
+}
+
 /** Import image files and insert them as image blocks, one after another, at `position` (or the selection). */
 export async function insertImageFiles(editor: Editor, files: File[], position?: number): Promise<string[]> {
   const errors: string[] = []
@@ -123,15 +159,9 @@ export async function insertImageFiles(editor: Editor, files: File[], position?:
     try {
       const { attachment, width, height } = await importImageFile(file)
       if (editor.isDestroyed) break
-      const node = { type: IMAGE_NODE, attrs: { attachmentId: attachment.id, width: 100, caption: '', naturalWidth: width, naturalHeight: height } }
-      if (at === undefined) {
-        editor.chain().insertContent(node).run()
-      } else {
-        const safe = Math.max(0, Math.min(at, editor.state.doc.content.size))
-        editor.chain().insertContentAt(safe, node).run()
-        // Later images follow the one just inserted.
-        at = editor.state.selection.to
-      }
+      insertImageNode(editor, { attachmentId: attachment.id, width: 100, caption: '', naturalWidth: width, naturalHeight: height }, at)
+      // Later images follow the one just inserted.
+      at = undefined
     } catch (error) {
       errors.push(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '') : String(error))
     }

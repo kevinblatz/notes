@@ -231,7 +231,19 @@ export function NoteEditor({ view }: { view: NoteView }) {
   const closeMenu = (): void => setMenu(null)
 
   return (
-    <section className="focus-view" aria-label="Note" data-testid="focus-view">
+    <section
+      className="focus-view"
+      aria-label="Note"
+      data-testid="focus-view"
+      onKeyDown={(event) => {
+        // Ctrl+Enter logs the note from anywhere in this view (title, caption, a toolbar
+        // button), not only while the caret is in the text.
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.defaultPrevented) {
+          event.preventDefault()
+          void returnToBoard()
+        }
+      }}
+    >
       <header className="focus-bar">
         <button type="button" className="ghost-button" onClick={() => void returnToBoard()} title="Back to the board (Esc)">
           <ArrowLeft size={16} />
