@@ -73,6 +73,24 @@ export async function storedNotes(app: ElectronApplication): Promise<Array<{ tit
 export const noteByText = (page: Page, text: string): Locator => notes(page).filter({ hasText: text }).first()
 
 /**
+ * Layout boxes of several notes, read in one call and in the board's own coordinates.
+ * Unlike boundingBox(), these are not affected by a transition that is still settling,
+ * and all notes are measured at the same instant.
+ */
+export async function layoutBoxes(page: Page, texts: string[]): Promise<Record<string, { x: number; y: number; width: number; height: number }>> {
+  return page.evaluate((wanted) => {
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('.board > .note'))
+    const out: Record<string, { x: number; y: number; width: number; height: number }> = {}
+    for (const text of wanted) {
+      const card = cards.find((element) => element.textContent?.includes(text))
+      if (!card) throw new Error(`No note contains "${text}"`)
+      out[text] = { x: card.offsetLeft, y: card.offsetTop, width: card.offsetWidth, height: card.offsetHeight }
+    }
+    return out
+  }, texts)
+}
+
+/**
  * Drag a note by its handle to a point given relative to another note's box
  * (fx, fy are fractions of that note's width and height).
  */

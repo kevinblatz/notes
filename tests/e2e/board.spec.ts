@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures'
-import { boardLabels, clickEmptySpace, collectConsoleErrors, dragNote, focusView, noteByText, notes, storedLayout, storedNotes, writeNote } from './helpers'
+import { boardLabels, clickEmptySpace, collectConsoleErrors, dragNote, focusView, layoutBoxes, noteByText, notes, storedLayout, storedNotes, writeNote } from './helpers'
 import { launch, setWindowSize, type Launched } from './launch'
 
 let ctx: Launched
@@ -44,10 +44,9 @@ test('new notes land where the click was: between rows, beside a note, or at the
   await page.keyboard.type('Beside note')
   await page.keyboard.press('Control+Enter')
   expect(await storedLayout(app)).toEqual([['Alpha note'], ['Between note'], ['Bravo note', 'Beside note']])
-  const left = (await noteByText(page, 'Bravo note').boundingBox())!
-  const right = (await noteByText(page, 'Beside note').boundingBox())!
-  expect(Math.abs(left.y - right.y)).toBeLessThan(2)
-  expect(right.x).toBeGreaterThan(left.x + left.width)
+  const pair = await layoutBoxes(page, ['Bravo note', 'Beside note'])
+  expect(pair['Beside note']!.y).toBe(pair['Bravo note']!.y)
+  expect(pair['Beside note']!.x).toBeGreaterThan(pair['Bravo note']!.x + pair['Bravo note']!.width)
 
   // The open space below everything: appended at the end.
   await clickEmptySpace(page)
@@ -175,12 +174,8 @@ test('one- and two-column layouts: pairs stack when narrow and return side by si
   expect(await storedLayout(app)).toEqual([['Alpha note', 'Bravo note'], ['Charlie note']])
 
   const geometry = async (): Promise<Record<string, { x: number; y: number; width: number }>> => {
-    const out: Record<string, { x: number; y: number; width: number }> = {}
-    for (const name of ['Alpha', 'Bravo', 'Charlie']) {
-      const box = (await noteByText(page, `${name} note`).boundingBox())!
-      out[name] = { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width) }
-    }
-    return out
+    const boxes = await layoutBoxes(page, ['Alpha note', 'Bravo note', 'Charlie note'])
+    return { Alpha: boxes['Alpha note']!, Bravo: boxes['Bravo note']!, Charlie: boxes['Charlie note']! }
   }
 
   // 960 px: two columns.
