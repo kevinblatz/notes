@@ -237,7 +237,9 @@ test('fonts, sizes, colours and highlights persist across a restart', async () =
   // Mixed formatting inside one note: the second paragraph becomes a heading with its own style.
   await editorBody(page).locator('p').nth(1).click()
   await pick('Paragraph style', 'Heading 2')
+  // Pressed immediately after choosing from the menu: must still log the note.
   await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
 
   const expectFormatting = async (): Promise<void> => {
     const styled = notes(page).first().locator('.prose p').first()

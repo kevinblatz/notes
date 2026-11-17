@@ -11,7 +11,7 @@ import { emptyDoc, SUGGESTED_TAGS, sanitizeTags } from '@shared/content'
 import { collectTags } from '@shared/search'
 import type { RichDoc } from '@shared/types'
 import { api } from '../../lib/api'
-import { useEscape } from '../../lib/escape'
+import { overlayDepth, useEscape } from '../../lib/escape'
 import { ACCEPT_ATTRIBUTE, hasFiles, imageFilesFrom } from '../../lib/images'
 import { sanitizePastedHtml } from '../../lib/pasteSanitizer'
 import { noteSaved, returnToBoard, setActiveSaver, toast } from '../../state/actions'
@@ -131,7 +131,16 @@ export function NoteEditor({ view }: { view: NoteView }) {
   tagsRef.current = tags
 
   const editorRef = useRef<Editor | null>(null)
-  const extensions = useMemo(() => buildExtensions({ onSubmit: () => void returnToBoard() }), [])
+  const extensions = useMemo(
+    () =>
+      buildExtensions({
+        onSubmit: () => {
+          // With a menu open above the note, Ctrl+Enter belongs to that menu, not to the note.
+          if (overlayDepth() <= 1) void returnToBoard()
+        }
+      }),
+    []
+  )
 
   const editor = useEditor({
     extensions,
@@ -210,6 +219,20 @@ export function NoteEditor({ view }: { view: NoteView }) {
 
   useEscape(true, () => void returnToBoard())
 
+  // Ctrl+Enter logs the note whenever this view is showing, wherever keyboard focus happens
+  // to be (in the text, the title, a caption, on a toolbar button, or nowhere at all just
+  // after a menu closed). Skipped when the editor already handled it or a menu is open.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.defaultPrevented || event.isComposing) return
+      if (overlayDepth() > 1) return
+      event.preventDefault()
+      void returnToBoard()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   const changed = (): void => saverRef.current?.touch()
 
   const onContainerDrop = (event: DragEvent<HTMLDivElement>): void => {
@@ -233,19 +256,7 @@ export function NoteEditor({ view }: { view: NoteView }) {
   const closeMenu = (): void => setMenu(null)
 
   return (
-    <section
-      className="focus-view"
-      aria-label="Note"
-      data-testid="focus-view"
-      onKeyDown={(event) => {
-        // Ctrl+Enter logs the note from anywhere in this view (title, caption, a toolbar
-        // button), not only while the caret is in the text.
-        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.defaultPrevented) {
-          event.preventDefault()
-          void returnToBoard()
-        }
-      }}
-    >
+    <section className="focus-view" aria-label="Note" data-testid="focus-view">
       <header className="focus-bar">
         <button type="button" className="ghost-button" onClick={() => void returnToBoard()} title="Back to the board (Esc)">
           <ArrowLeft size={16} />

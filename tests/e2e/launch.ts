@@ -47,7 +47,8 @@ export interface LaunchOptions {
 export async function launch(options: LaunchOptions = {}): Promise<Launched> {
   const dataDir = options.dataDir ?? freshDataDir()
   const app = await electron.launch({
-    args: [ROOT, '--no-sandbox', ...(options.args ?? [])],
+    // TRADING_NOTES_E2E_ENTRY lets a run target a different build of the main process.
+    args: [process.env.TRADING_NOTES_E2E_ENTRY ?? ROOT, '--no-sandbox', ...(options.args ?? [])],
     cwd: ROOT,
     env: {
       ...(process.env as Record<string, string>),

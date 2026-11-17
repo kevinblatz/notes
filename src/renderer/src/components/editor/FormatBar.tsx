@@ -192,6 +192,9 @@ export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: 
   const linkAnchor = useRef<HTMLButtonElement>(null)
   const run = (fn: (chain: ReturnType<Editor['chain']>) => ReturnType<Editor['chain']>) => (): void => {
     fn(editor.chain().focus()).run()
+    // Return the keyboard to the text right away (the command above does it a frame later),
+    // so typing or Ctrl+Enter immediately after choosing from a menu is not lost.
+    editor.view.focus()
   }
 
   const styleEntries: MenuEntry[] = [
@@ -253,6 +256,9 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
   const toggle = (next: 'ink' | 'highlight' | 'link') => (): void => setRow((current) => (current === next ? null : next))
   const run = (fn: (chain: ReturnType<Editor['chain']>) => ReturnType<Editor['chain']>) => (): void => {
     fn(editor.chain().focus()).run()
+    // Return the keyboard to the text right away (the command above does it a frame later),
+    // so typing or Ctrl+Enter immediately after choosing from a menu is not lost.
+    editor.view.focus()
   }
   return (
     <BubbleMenu

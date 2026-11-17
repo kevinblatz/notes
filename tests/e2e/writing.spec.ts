@@ -132,6 +132,43 @@ test('title is optional and Esc closes the top-most thing first', async () => {
   expect(await boardLabels(page)).toEqual(['London session rules'])
 })
 
+test('Ctrl+Enter logs the note wherever keyboard focus is', async () => {
+  const { page, app } = ctx
+  await clickEmptySpace(page)
+  await page.keyboard.type('Focus can be anywhere')
+
+  // Focus is on nothing at all (as it is for an instant after a menu closes).
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true)
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+  expect((await storedNotes(app)).map((n) => n.plainText)).toEqual(['Focus can be anywhere'])
+
+  // Focus on a toolbar button.
+  await notes(page).first().click()
+  await expect(focusView(page)).toBeVisible()
+  await page.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Bold' }).focus()
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+
+  // Straight after choosing from a formatting menu, with no pause.
+  await notes(page).first().click()
+  await page.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Paragraph style' }).click()
+  await page.getByRole('menuitemcheckbox', { name: 'Heading 2', exact: true }).click()
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+  await expect(notes(page).first().locator('.prose h2')).toHaveText('Focus can be anywhere')
+
+  // While a menu is open, Ctrl+Enter does not log the note behind it.
+  await notes(page).first().click()
+  await page.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Font' }).click()
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await expect(focusView(page)).toBeHidden()
+})
+
 test('controls, selecting text, dragging and scrolling never create a note', async () => {
   const { page, app } = ctx
   for (let i = 1; i <= 6; i++) await writeNote(page, [`Note number ${i}`, 'Some more words to select and scroll past. '.repeat(6)])

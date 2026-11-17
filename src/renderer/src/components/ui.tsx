@@ -57,7 +57,9 @@ interface PopoverProps {
  */
 export function Popover({ anchor, open, onClose, placement = 'bottom', align = 'start', className, role = 'dialog', label, keepFocus, children }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const [style, setStyle] = useState<CSSProperties>({ visibility: 'hidden' })
+  // Until it has been measured and placed, the panel is transparent rather than hidden: a
+  // hidden element cannot take keyboard focus, and menus must be focusable the moment they open.
+  const [style, setStyle] = useState<CSSProperties>({ top: 0, left: 0, opacity: 0 })
 
   const reposition = useCallback(() => {
     const panel = ref.current
@@ -72,13 +74,20 @@ export function Popover({ anchor, open, onClose, placement = 'bottom', align = '
     top = Math.max(margin, Math.min(top, window.innerHeight - height - margin))
     let left = align === 'start' ? a.left : align === 'end' ? a.right - width : a.left + a.width / 2 - width / 2
     left = Math.max(margin, Math.min(left, window.innerWidth - width - margin))
-    setStyle({ top, left, visibility: 'visible' })
+    setStyle({ top, left })
   }, [anchor, placement, align])
 
   useLayoutEffect(() => {
-    if (open) reposition()
-    else setStyle({ visibility: 'hidden' })
-  }, [open, reposition])
+    if (!open) {
+      setStyle({ top: 0, left: 0, opacity: 0 })
+      return
+    }
+    reposition()
+    if (keepFocus) return
+    // Move the keyboard into the panel so arrow keys, Tab and Enter work straight away.
+    const first = ref.current?.querySelector<HTMLElement>('[data-autofocus], button:not([disabled]), input, [tabindex="0"]')
+    first?.focus({ preventScroll: true })
+  }, [open, reposition, keepFocus])
 
   useEffect(() => {
     if (!open) return
@@ -105,12 +114,6 @@ export function Popover({ anchor, open, onClose, placement = 'bottom', align = '
     onClose()
     if (!keepFocus) anchor?.focus()
   })
-
-  useEffect(() => {
-    if (!open || keepFocus) return
-    const first = ref.current?.querySelector<HTMLElement>('[data-autofocus], button:not([disabled]), input, [tabindex="0"]')
-    first?.focus({ preventScroll: true })
-  }, [open, keepFocus])
 
   if (!open) return null
   return createPortal(
