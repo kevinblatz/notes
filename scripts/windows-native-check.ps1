@@ -128,36 +128,45 @@ function TypeText([string]$text) {
 }
 
 # Locate the app's notification-area (tray) icon with UI Automation. Returns its screen
-# rectangle, or $null. Looks in the visible tray first, then opens the overflow flyout.
+# rectangle, or $null. Tray icons belong to explorer.exe and are named after their tooltip.
+# Looks at what is visible first, then opens the "Show hidden icons" flyout and looks again.
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 function FindTrayIcon([string]$tooltip) {
   $automation = [System.Windows.Automation.AutomationElement]
   $scope = [System.Windows.Automation.TreeScope]
-  $byName = New-Object System.Windows.Automation.PropertyCondition($automation::NameProperty, $tooltip)
+  $shellIds = @(Get-Process -Name explorer, ShellExperienceHost -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
   $search = {
-    foreach ($className in @("Shell_TrayWnd", "NotifyIconOverflowWindow", "TopLevelWindowForOverflowXamlIsland", "Xaml_WindowedPopupClass")) {
-      $hostCondition = New-Object System.Windows.Automation.PropertyCondition($automation::ClassNameProperty, $className)
-      foreach ($shellWindow in $automation::RootElement.FindAll($scope::Children, $hostCondition)) {
-        $icon = $shellWindow.FindFirst($scope::Descendants, $byName)
-        if ($icon -and -not $icon.Current.BoundingRectangle.IsEmpty) { return $icon.Current.BoundingRectangle }
-      }
+    foreach ($top in $automation::RootElement.FindAll($scope::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+      try {
+        if ($shellIds -notcontains $top.Current.ProcessId) { continue }
+        foreach ($element in $top.FindAll($scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+          $name = $element.Current.Name
+          if ($name -and $name.StartsWith($tooltip) -and -not $element.Current.BoundingRectangle.IsEmpty) { return $element.Current.BoundingRectangle }
+        }
+      } catch { }
     }
     return $null
   }
   $rect = & $search
   if ($rect) { return $rect }
-  # Not in the visible tray: open "Show hidden icons" and look again.
   $tray = $automation::RootElement.FindFirst($scope::Children, (New-Object System.Windows.Automation.PropertyCondition($automation::ClassNameProperty, "Shell_TrayWnd")))
-  if (-not $tray) { return $null }
-  foreach ($button in $tray.FindAll($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($automation::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))) {
-    if ($button.Current.Name -match "hidden icons|Notification Chevron" -or $button.Current.AutomationId -match "SystemTrayIcon|NotifyChevron") {
-      $b = $button.Current.BoundingRectangle
-      Click ([int]($b.X + $b.Width / 2)) ([int]($b.Y + $b.Height / 2))
-      Start-Sleep -Milliseconds 900
-      return (& $search)
+  if (-not $tray) { Say "  (tray search: taskbar window not found)"; return $null }
+  $names = New-Object System.Collections.Generic.List[string]
+  foreach ($element in $tray.FindAll($scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+    $current = $element.Current
+    if ($current.Name) { $names.Add(("{0} [{1}/{2}]" -f $current.Name, $current.ControlType.ProgrammaticName.Replace("ControlType.", ""), $current.AutomationId)) }
+    if ($current.Name -match "hidden icons|Notification Chevron|overflow" -or $current.AutomationId -match "NotifyChevron|ShowHiddenIcons|OverflowButton") {
+      $b = $current.BoundingRectangle
+      if (-not $b.IsEmpty) {
+        Click ([int]($b.X + $b.Width / 2)) ([int]($b.Y + $b.Height / 2))
+        Start-Sleep -Milliseconds 1200
+        $rect = & $search
+        if ($rect) { return $rect }
+      }
     }
   }
+  Say ("  (tray search: taskbar elements seen: " + (($names | Select-Object -First 40) -join "; ") + ")")
   return $null
 }
 
@@ -166,6 +175,8 @@ $appName = [System.IO.Path]::GetFileNameWithoutExtension($AppExe)
 $dataDir = Join-Path ([System.IO.Path]::GetTempPath()) ("tn-native-" + [guid]::NewGuid().ToString("N"))
 $chromeProfile = Join-Path ([System.IO.Path]::GetTempPath()) ("tn-chrome-" + [guid]::NewGuid().ToString("N"))
 $env:TRADING_NOTES_DATA_DIR = $dataDir
+$diagnostics = Join-Path (Resolve-Path $OutDir).Path "app-diagnostics.json"
+$env:TRADING_NOTES_DIAGNOSTICS = $diagnostics
 $work = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 Say "Screen $($screen.Width)x$($screen.Height), work area $($work.X),$($work.Y) $($work.Width)x$($work.Height)"
@@ -180,6 +191,17 @@ try {
   if ($null -eq $notes) { throw "The notes window never appeared." }
   Start-Sleep -Seconds 2
   Shot "01-launched"
+
+  # What the app itself reports about its tray icon and shortcut.
+  $report = $null
+  if (Test-Path $diagnostics) { $report = Get-Content $diagnostics -Raw | ConvertFrom-Json }
+  Check "App reports its start-up state" ($null -ne $report)
+  if ($report) {
+    Say ("  version {0}, packaged {1}, Electron {2}" -f $report.version, $report.packaged, $report.electron)
+    Check "Tray icon was created" ([bool]$report.tray.created)
+    Check "Tray icon image loaded from the packaged app" ([bool]$report.tray.iconLoaded)
+    Check "Global shortcut registered with Windows" ([bool]$report.shortcut.registered) ("{0} {1}" -f $report.shortcut.accelerator, $report.shortcut.error)
+  }
 
   $rect = RectOf $notes
   Check "Notes window is always-on-top (WS_EX_TOPMOST)" (IsTopmost $notes)

@@ -13,6 +13,7 @@ export interface TrayActions {
 
 export class TrayController {
   private tray: Tray | null = null
+  private iconLoaded = false
 
   constructor(
     private readonly iconPath: string,
@@ -22,6 +23,7 @@ export class TrayController {
   create(): void {
     if (this.tray) return
     const image = nativeImage.createFromPath(this.iconPath)
+    this.iconLoaded = !image.isEmpty()
     this.tray = new Tray(image)
     this.tray.setToolTip('Trading Notes')
     this.tray.on('click', () => this.actions.toggle())
@@ -46,6 +48,11 @@ export class TrayController {
       { label: 'Quit Trading Notes', click: () => this.actions.quit() }
     ])
     this.tray.setContextMenu(menu)
+  }
+
+  /** For start-up diagnostics: whether the icon exists and its image file was readable. */
+  state(): { created: boolean; iconLoaded: boolean } {
+    return { created: this.tray !== null && !this.tray.isDestroyed(), iconLoaded: this.iconLoaded }
   }
 
   destroy(): void {

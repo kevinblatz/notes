@@ -2,6 +2,7 @@
  * Main process entry point: wires the note library, the window, the tray icon, the global
  * shortcut and the IPC bridge together, and owns startup and shutdown.
  */
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, dialog, session } from 'electron'
 import type { Preferences, SessionInfo } from '@shared/types'
@@ -169,6 +170,29 @@ async function main(): Promise<void> {
   } catch {
     // Some Linux desktops have no tray; the window and shortcut still work.
     tray = null
+  }
+
+  // Optional start-up report, used by scripts/windows-native-check.ps1 to confirm that the
+  // packaged app really created its tray icon and registered its shortcut.
+  const diagnosticsFile = process.env.TRADING_NOTES_DIAGNOSTICS
+  if (diagnosticsFile) {
+    try {
+      writeFileSync(
+        diagnosticsFile,
+        JSON.stringify({
+          version: app.getVersion(),
+          packaged: app.isPackaged,
+          electron: process.versions.electron,
+          tray: tray ? tray.state() : { created: false, iconLoaded: false },
+          shortcut: shortcuts.status(),
+          alwaysOnTop: win.isAlwaysOnTop(),
+          bounds: win.getBounds(),
+          dataDir: lib.dataDir
+        })
+      )
+    } catch {
+      // Diagnostics are best effort.
+    }
   }
 
   app.on('before-quit', (event) => {
