@@ -4,6 +4,7 @@ import { defineConfig } from '@playwright/test'
 // or use `npm run test:e2e`, which does both.
 export default defineConfig({
   testDir: 'tests/e2e',
+  tsconfig: './tsconfig.e2e.json',
   testMatch: '**/*.spec.ts',
   timeout: 90_000,
   expect: { timeout: 8_000 },

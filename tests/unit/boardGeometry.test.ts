@@ -27,7 +27,7 @@ function measure(layout: BoardLayout, wide: boolean, heights: Record<string, num
       }
     }
   }
-  return { contentLeft: PAD, contentRight: PAD + WIDTH, wide, gap: GAP, boxes }
+  return { contentLeft: PAD, contentRight: PAD + WIDTH, contentTop: 20, wide, gap: GAP, boxes }
 }
 
 const L = (...rows: string[][]): BoardLayout => ({ rows: rows.map((notes, i) => ({ id: `row${i}`, notes })) })

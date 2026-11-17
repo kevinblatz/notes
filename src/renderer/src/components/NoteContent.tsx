@@ -168,7 +168,10 @@ interface Props extends NoteContentHandlers {
 export const NoteContent = memo(
   function NoteContent({ doc, onToggleTask, onOpenLink, onOpenImage }: Props) {
     const context: Context = { onToggleTask, onOpenLink, onOpenImage, taskCounter: { value: 0 } }
-    return <div className="prose">{renderBlocks(doc.content, context)}</div>
+    // The editor keeps an empty paragraph at the end for the caret; the board does not show it.
+    let blocks = doc.content ?? []
+    while (blocks.length > 1 && blocks[blocks.length - 1]!.type === 'paragraph' && !blocks[blocks.length - 1]!.content?.length) blocks = blocks.slice(0, -1)
+    return <div className="prose">{renderBlocks(blocks, context)}</div>
   },
   // The handlers only close over the note's ID, so the content needs re-rendering only when
   // the document itself changes. This keeps typing in one note from re-rendering the rest.

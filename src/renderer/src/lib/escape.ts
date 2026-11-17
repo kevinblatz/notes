@@ -7,6 +7,23 @@ import { useEffect, useRef } from 'react'
 
 const stack: Array<{ run: () => void }> = []
 let installed = false
+let openAtPointerDown = false
+
+// Registered at load, so it runs before any menu's own "click outside" handler: it records
+// whether something was open at the moment the pointer went down. A press that closes a
+// menu must not also be treated as a click on the board underneath.
+window.addEventListener(
+  'pointerdown',
+  () => {
+    openAtPointerDown = stack.length > 0
+  },
+  true
+)
+
+/** True when a menu, panel or preview was open at the start of the current press. */
+export function overlayWasOpenAtPointerDown(): boolean {
+  return openAtPointerDown
+}
 
 function install(): void {
   if (installed) return

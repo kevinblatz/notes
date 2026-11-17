@@ -529,32 +529,32 @@ kbd {
   cursor: grabbing;
 }
 
-/* Where a new note will go: a teal line carrying a small text caret. */
+/* Where a new note will go: a text caret with a short baseline that fades out. */
 .insert-mark {
   position: absolute;
   z-index: 3;
   pointer-events: none;
-  background: var(--accent);
   border-radius: 2px;
-  opacity: 0.85;
 }
 .insert-mark.is-horizontal {
   height: 2px;
   margin-top: -1px;
+  background: linear-gradient(to right, var(--accent), color-mix(in srgb, var(--accent) 35%, transparent) 38%, transparent 82%);
 }
 .insert-mark.is-horizontal::before {
   content: '';
   position: absolute;
   left: 0;
-  top: -6px;
+  top: -8px;
   width: 2px;
-  height: 14px;
+  height: 18px;
   border-radius: 2px;
   background: var(--accent);
 }
 .insert-mark.is-vertical {
   width: 2px;
   margin-left: -1px;
+  background: var(--accent);
 }
 
 /* ------------------------------------------------------------------ note text */
@@ -609,22 +609,22 @@ kbd {
   list-style: none;
   padding-left: 0.1em;
 }
-.prose li[data-type='taskItem'] {
+.prose ul[data-type='taskList'] > li {
   display: flex;
   align-items: flex-start;
   gap: 0.6em;
 }
-.prose li[data-type='taskItem'] > label {
+.prose ul[data-type='taskList'] > li > label {
   flex: none;
   margin-top: 0.27em;
   line-height: 0;
   user-select: none;
 }
-.prose li[data-type='taskItem'] > div {
+.prose ul[data-type='taskList'] > li > div {
   flex: 1;
   min-width: 0;
 }
-.prose li[data-type='taskItem'] input[type='checkbox'] {
+.prose ul[data-type='taskList'] > li input[type='checkbox'] {
   appearance: none;
   display: grid;
   place-content: center;
@@ -635,11 +635,11 @@ kbd {
   border-radius: 4px;
   cursor: pointer;
 }
-.prose li[data-type='taskItem'] input[type='checkbox']:checked {
+.prose ul[data-type='taskList'] > li input[type='checkbox']:checked {
   background: var(--accent);
   border-color: var(--accent);
 }
-.prose li[data-type='taskItem'] input[type='checkbox']:checked::after {
+.prose ul[data-type='taskList'] > li input[type='checkbox']:checked::after {
   content: '';
   width: 0.5em;
   height: 0.28em;
@@ -647,7 +647,7 @@ kbd {
   border-bottom: 2px solid var(--accent-ink);
   transform: translateY(-0.06em) rotate(-45deg);
 }
-.prose li[data-checked='true'] > div {
+.prose ul[data-type='taskList'] > li[data-checked='true'] > div {
   color: var(--ink-faint);
   text-decoration: line-through;
   text-decoration-color: var(--line-strong);

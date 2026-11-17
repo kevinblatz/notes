@@ -25,6 +25,8 @@ export interface BoardGeometry {
   /** Left and right edge of the area notes occupy (inside the board's side padding). */
   contentLeft: number
   contentRight: number
+  /** Top edge of the first row (the board's top padding). */
+  contentTop: number
   /** True when pairs are shown side by side; false when they are stacked. */
   wide: boolean
   /** Space between neighbouring notes. */
@@ -94,7 +96,8 @@ export function hitEmptySpace(geometry: BoardGeometry, layout: BoardLayout, x: n
   const rows = bands(geometry, layout)
   const half = geometry.gap / 2
   if (rows.length === 0) {
-    return { placement: { kind: 'row', index: 0 }, indicator: horizontal(geometry, Math.max(half, y)) }
+    // The first note always starts at the top of the board, wherever the click was.
+    return { placement: { kind: 'row', index: 0 }, indicator: horizontal(geometry, geometry.contentTop + half) }
   }
 
   for (const band of rows) {

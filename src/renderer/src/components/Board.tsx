@@ -12,7 +12,7 @@ import { hitDrag, hitEmptySpace, placementsEqual, type BoardGeometry, type Indic
 import { noteLabel } from '@shared/content'
 import { findNote, insertNote, liftNote, placementOf } from '@shared/layout'
 import type { BoardLayout, Placement } from '@shared/types'
-import { overlayDepth } from '../lib/escape'
+import { overlayDepth, overlayWasOpenAtPointerDown } from '../lib/escape'
 import { captureBoardPositions, motionReduced, playBoardAnimation, registerBoard } from '../lib/flip'
 import { hasFiles, imageFilesFrom } from '../lib/images'
 import { dropNote, startDraft } from '../state/actions'
@@ -42,6 +42,7 @@ function readGeometry(board: HTMLElement, wide: boolean): BoardGeometry {
   return {
     contentLeft: parseFloat(style.paddingLeft) || 0,
     contentRight: board.clientWidth - (parseFloat(style.paddingRight) || 0),
+    contentTop: parseFloat(style.paddingTop) || 0,
     wide,
     gap: parseFloat(style.rowGap) || 16,
     boxes
@@ -146,9 +147,14 @@ export function Board({ hidden }: { hidden: boolean }) {
     // Only a plain primary-button press that starts on the bare board counts, and not one
     // that is closing a menu or clearing a text selection.
     if (event.target !== event.currentTarget || event.button !== 0 || event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return
-    if (overlayDepth() > 0) return
+    if (overlayDepth() > 0 || overlayWasOpenAtPointerDown()) return
     const selection = window.getSelection()
-    if (selection && !selection.isCollapsed && selection.toString().length > 0) return
+    if (selection && !selection.isCollapsed && selection.toString().length > 0) {
+      // Clicking away from selected text deselects it, as anywhere else; it does not also
+      // start a note. The next click on empty space will.
+      selection.removeAllRanges()
+      return
+    }
     press.current = { x: event.clientX, y: event.clientY, scrollTop: scroller.current?.scrollTop ?? 0 }
   }
 

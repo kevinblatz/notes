@@ -6,7 +6,7 @@
 import type { Editor } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { ArrowLeft, ClipboardPaste, Copy, Plus, Scissors, Tag, TextSelect, Type, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { emptyDoc, SUGGESTED_TAGS, sanitizeTags } from '@shared/content'
 import { collectTags } from '@shared/search'
 import type { RichDoc } from '@shared/types'
@@ -192,14 +192,17 @@ export function NoteEditor({ view }: { view: NoteView }) {
   }, [editor, view.noteId])
 
   // Place the caret: where the user clicked on the board, or at the end, or at the start of a new draft.
+  // Focus happens in the same frame the editor appears, so typing can start immediately
+  // after the click without losing the first keystrokes.
+  useLayoutEffect(() => {
+    if (editor.isDestroyed) return
+    const hinted = positionFromHint(editor.state.doc, view.caret)
+    editor.commands.focus(hinted ?? (view.isNew ? 'start' : 'end'), { scrollIntoView: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor])
+
   useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      if (editor.isDestroyed) return
-      const hinted = positionFromHint(editor.state.doc, view.caret)
-      editor.commands.focus(hinted ?? (view.isNew ? 'start' : 'end'), { scrollIntoView: true })
-      if (view.initialFiles.length > 0) void insertImageFiles(editor, view.initialFiles).then(reportImageErrors)
-    })
-    return () => cancelAnimationFrame(frame)
+    if (view.initialFiles.length > 0) void insertImageFiles(editor, view.initialFiles).then(reportImageErrors)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor])
 
