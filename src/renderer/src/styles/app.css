@@ -18,6 +18,15 @@
   --pad-x: clamp(18px, 4vw, 40px);
   --radius: 10px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* The app's cursor set (lib/cursors.ts replaces these with its drawings per theme). */
+  --cursor-arrow: default;
+  --cursor-pointer: pointer;
+  --cursor-text: text;
+  --cursor-write: text;
+  --cursor-grab: grab;
+  --cursor-grabbing: grabbing;
+  --cursor-zoom-in: zoom-in;
+  --cursor-zoom-out: zoom-out;
   color-scheme: dark;
 }
 
@@ -140,11 +149,11 @@ button {
   background: none;
   border: 0;
   padding: 0;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 button:disabled {
-  cursor: default;
+  cursor: var(--cursor-arrow);
   opacity: 0.4;
 }
 
@@ -361,7 +370,8 @@ kbd {
   min-height: 100%;
   /* Content stays a readable width in a very wide window; the bare board still fills it. */
   padding: 6px max(var(--pad-x), calc((100% - 1240px) / 2)) 46vh;
-  cursor: text;
+  /* Empty board space: the pen nib, "click here to write". */
+  cursor: var(--cursor-write);
 }
 .board.is-wide {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -382,7 +392,7 @@ kbd {
   padding: 13px 18px 14px;
   background: var(--sheet);
   border-radius: var(--radius);
-  cursor: text;
+  cursor: var(--cursor-pointer);
   user-select: text;
   transition: background-color 120ms var(--ease);
 }
@@ -432,12 +442,16 @@ kbd {
   opacity: 1;
 }
 .note-handle {
-  cursor: grab;
+  cursor: var(--cursor-grab);
   touch-action: none;
 }
-.board.is-dragging,
-.board.is-dragging .note {
-  cursor: grabbing;
+.note-handle:active {
+  cursor: var(--cursor-grabbing);
+}
+/* While a note is carried, the closed hand stays wherever the pointer goes. */
+:root:has(.board.is-dragging),
+:root:has(.board.is-dragging) * {
+  cursor: var(--cursor-grabbing) !important;
 }
 .board.is-dragging .note-tools {
   visibility: hidden;
@@ -526,35 +540,7 @@ kbd {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: grabbing;
-}
-
-/* Where a new note will go: a text caret with a short baseline that fades out. */
-.insert-mark {
-  position: absolute;
-  z-index: 3;
-  pointer-events: none;
-  border-radius: 2px;
-}
-.insert-mark.is-horizontal {
-  height: 2px;
-  margin-top: -1px;
-  background: linear-gradient(to right, var(--accent), color-mix(in srgb, var(--accent) 35%, transparent) 38%, transparent 82%);
-}
-.insert-mark.is-horizontal::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: -8px;
-  width: 2px;
-  height: 18px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-.insert-mark.is-vertical {
-  width: 2px;
-  margin-left: -1px;
-  background: var(--accent);
+  cursor: var(--cursor-grabbing);
 }
 
 /* ------------------------------------------------------------------ note text */
@@ -623,6 +609,8 @@ kbd {
 .prose ul[data-type='taskList'] > li > div {
   flex: 1;
   min-width: 0;
+  /* Present but invisible until the item is done, so the strike can fade in. */
+  text-decoration: line-through transparent;
 }
 .prose ul[data-type='taskList'] > li input[type='checkbox'] {
   appearance: none;
@@ -633,23 +621,26 @@ kbd {
   margin: 0;
   border: 1.5px solid var(--ink-faint);
   border-radius: 4px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .prose ul[data-type='taskList'] > li input[type='checkbox']:checked {
   background: var(--accent);
   border-color: var(--accent);
 }
-.prose ul[data-type='taskList'] > li input[type='checkbox']:checked::after {
+/* The tick is always there, drawn at zero size until the box is checked (so it can spring in). */
+.prose ul[data-type='taskList'] > li input[type='checkbox']::after {
   content: '';
   width: 0.5em;
   height: 0.28em;
   border-left: 2px solid var(--accent-ink);
   border-bottom: 2px solid var(--accent-ink);
+  transform: translateY(-0.06em) rotate(-45deg) scale(0);
+}
+.prose ul[data-type='taskList'] > li input[type='checkbox']:checked::after {
   transform: translateY(-0.06em) rotate(-45deg);
 }
 .prose ul[data-type='taskList'] > li[data-checked='true'] > div {
   color: var(--ink-faint);
-  text-decoration: line-through;
   text-decoration-color: var(--line-strong);
 }
 .prose blockquote {
@@ -688,7 +679,7 @@ kbd {
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent);
   text-underline-offset: 2px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .prose mark {
   color: inherit;
@@ -705,7 +696,7 @@ kbd {
 .note-image-button {
   display: block;
   width: 100%;
-  cursor: zoom-in;
+  cursor: var(--cursor-zoom-in);
   border-radius: 6px;
 }
 .note-image img,
@@ -791,7 +782,7 @@ kbd {
 .focus-scroll {
   overflow-y: auto;
   overflow-x: hidden;
-  cursor: text;
+  cursor: var(--cursor-text);
 }
 .focus-scroll.is-drop-target {
   box-shadow: inset 0 0 0 2px var(--accent);
@@ -931,7 +922,7 @@ kbd {
   gap: 6px;
   margin-top: 26px;
   font-size: 12.5px;
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 .tag-chip {
   display: inline-flex;
@@ -1294,7 +1285,7 @@ kbd {
   gap: 12px;
   padding: 7px 10px;
   border-radius: 8px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .result.is-active {
   background: var(--accent-wash);
@@ -1377,7 +1368,7 @@ kbd {
   outline: 1px solid var(--accent);
 }
 .pin-handle {
-  cursor: grab;
+  cursor: var(--cursor-grab);
   touch-action: none;
 }
 .pin-open {
@@ -1576,7 +1567,7 @@ p.setting-help {
   padding: 10px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 9px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .choice.is-selected {
   border-color: var(--accent);
@@ -1601,7 +1592,7 @@ p.setting-help {
   gap: 8px;
   align-items: center;
   margin: 0 0 12px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .button-row {
   display: flex;
@@ -1718,10 +1709,13 @@ p.setting-help {
   padding: 6px 14px 16px;
   overflow: hidden;
   outline: 0;
-  cursor: zoom-out;
+  cursor: var(--cursor-zoom-out);
 }
 .preview-stage.is-zoomed {
-  cursor: grab;
+  cursor: var(--cursor-grab);
+}
+.preview-stage.is-zoomed:active {
+  cursor: var(--cursor-grabbing);
 }
 .preview-stage img {
   max-width: 100%;
@@ -1729,11 +1723,14 @@ p.setting-help {
   min-height: 0;
   object-fit: contain;
   border-radius: 4px;
-  cursor: zoom-in;
+  cursor: var(--cursor-zoom-in);
   transition: transform 90ms var(--ease);
 }
 .preview-stage.is-zoomed img {
-  cursor: grab;
+  cursor: var(--cursor-grab);
+}
+.preview-stage.is-zoomed:active img {
+  cursor: var(--cursor-grabbing);
 }
 
 /* ------------------------------------------------------------------ reduced motion */
@@ -1744,5 +1741,6 @@ p.setting-help {
   animation-duration: 0.001ms !important;
   animation-delay: 0s !important;
   transition-duration: 0.001ms !important;
+  transition-delay: 0s !important;
   scroll-behavior: auto !important;
 }

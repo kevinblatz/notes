@@ -1,1 +1,251 @@
 /* Styles for cursors, click feedback and other small interaction details. Loaded after app.css and uses its design tokens. */
+
+/* ------------------------------------------------------------------ cursors */
+
+/*
+ * One cursor family everywhere (lib/cursors.ts draws it). Elements take their parent's
+ * cursor unless a rule gives them one, so the browser's own cursors (its arrow on labels and
+ * selects, its I-beam over plain text) never mix in. Window-edge resizing is the system's.
+ */
+* {
+  cursor: inherit;
+}
+html,
+body {
+  cursor: var(--cursor-arrow);
+}
+a[href],
+label,
+select,
+summary,
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'],
+input[type='file'] {
+  cursor: var(--cursor-pointer);
+}
+input:not([type]),
+input[type='text'],
+input[type='search'],
+input[type='url'],
+input[type='email'],
+input[type='number'],
+input[type='password'],
+textarea,
+[contenteditable='true'],
+.palette-input {
+  cursor: var(--cursor-text);
+}
+:disabled {
+  cursor: var(--cursor-arrow);
+}
+
+/*
+ * A note on the board opens with a click: the pointing hand over the sheet and its title,
+ * the I-beam over its text, where the caret will land at the point clicked. (The whole text
+ * column, not just the glyphs, so moving down through a paragraph does not flicker.)
+ */
+.note .prose {
+  cursor: var(--cursor-text);
+}
+.note .prose a,
+.note .prose a * {
+  cursor: var(--cursor-pointer);
+}
+
+/* ------------------------------------------------------------------ starting a note */
+
+/* A drop of ink where empty board space was clicked: a dot that lands and a ring that spreads. */
+.ink-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ink-drop {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+.ink-drop-ring,
+.ink-drop-dot {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0;
+}
+/* The ring spreads fast and slows (ink-spread), and fades late (ink-fade). */
+.ink-drop-ring {
+  left: -26px;
+  top: -26px;
+  width: 52px;
+  height: 52px;
+  border: 2px solid var(--accent);
+  animation:
+    ink-spread 440ms cubic-bezier(0.2, 0.8, 0.3, 1) 30ms backwards,
+    ink-fade 440ms cubic-bezier(0.5, 0, 0.75, 0.6) 30ms backwards;
+}
+/* The drop lands with a small squash, then soaks in. */
+.ink-drop-dot {
+  left: -6px;
+  top: -6px;
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  animation: ink-dot 380ms ease-out;
+}
+@keyframes ink-spread {
+  from {
+    transform: scale(0.22);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@keyframes ink-fade {
+  from {
+    opacity: 0.9;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes ink-dot {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  18% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  36% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+}
+
+/* The new note's page grows out of the point that was clicked (instead of the usual fade-in). */
+:root[data-bloom] .focus-view {
+  transform-origin: var(--bloom-x, 50%) var(--bloom-y, 30%);
+  animation: note-bloom 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes note-bloom {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  55% {
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------------------------ press feedback */
+
+/*
+ * Buttons give a little under the pointer and spring back on release. Icon buttons squeeze
+ * only their icon, so the button itself (what the pointer hits, what a menu is anchored to)
+ * never moves. Text buttons shrink a touch; while pressed they keep a full-size hit area, so
+ * a press that starts near the edge still lands on the button.
+ */
+:is(.icon-button, .tag-chip button, .toast-close, .banner-close) > svg {
+  transition: transform 340ms cubic-bezier(0.34, 1.8, 0.5, 1);
+}
+:is(.icon-button, .tag-chip button, .toast-close, .banner-close):active:not(:disabled) > svg {
+  transform: scale(0.78);
+  transition-duration: 70ms;
+  transition-timing-function: ease-out;
+}
+:is(.primary-button, .danger-button, .small-button, .ghost-button, .shortcut-button, .tag-add, .tag-suggestion, .tag-filter, .segmented button, .palette-tabs button) {
+  position: relative;
+  transition: transform 340ms cubic-bezier(0.34, 1.7, 0.5, 1);
+}
+:is(.primary-button, .danger-button, .small-button, .ghost-button, .shortcut-button, .tag-add, .tag-suggestion, .tag-filter, .segmented button, .palette-tabs button):active:not(:disabled) {
+  transform: scale(0.955);
+  transition-duration: 70ms;
+  transition-timing-function: ease-out;
+}
+:is(.primary-button, .danger-button, .small-button, .ghost-button, .shortcut-button, .tag-add, .tag-suggestion, .tag-filter, .segmented button, .palette-tabs button):active:not(:disabled)::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+/* Pinning: the pin is pushed in (a short overshoot), with one soft ring. */
+.icon-button.is-popping > svg {
+  animation: pin-pop 440ms cubic-bezier(0.3, 1.45, 0.45, 1);
+}
+.icon-button.is-popping::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: pin-ring 440ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+@keyframes pin-pop {
+  0% {
+    transform: translateY(-3px) scale(0.7) rotate(-24deg);
+  }
+  60% {
+    transform: translateY(0.5px) scale(1.16) rotate(4deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes pin-ring {
+  from {
+    opacity: 0.7;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+
+/* ------------------------------------------------------------------ checklists */
+
+/*
+ * Ticking an item: the box gives under the press, the tick springs in with a soft ring, and
+ * the text fades to done. Transitions only, so nothing replays when the board is shown again.
+ */
+.prose ul[data-type='taskList'] > li input[type='checkbox'] {
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  transition:
+    transform 340ms cubic-bezier(0.34, 1.8, 0.5, 1),
+    background-color 120ms var(--ease),
+    border-color 120ms var(--ease),
+    box-shadow 0s;
+}
+.prose ul[data-type='taskList'] > li input[type='checkbox']:active {
+  transform: scale(0.8);
+  transition-duration: 70ms, 120ms, 120ms, 0s;
+}
+.prose ul[data-type='taskList'] > li input[type='checkbox']:checked {
+  box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent);
+  transition:
+    transform 340ms cubic-bezier(0.34, 1.8, 0.5, 1),
+    background-color 120ms var(--ease),
+    border-color 120ms var(--ease),
+    box-shadow 520ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.prose ul[data-type='taskList'] > li input[type='checkbox']::after {
+  transition: transform 90ms ease-in;
+}
+.prose ul[data-type='taskList'] > li input[type='checkbox']:checked::after {
+  transition: transform 360ms cubic-bezier(0.34, 1.9, 0.5, 1) 40ms;
+}
+.prose ul[data-type='taskList'] > li > div {
+  transition:
+    color 280ms var(--ease),
+    text-decoration-color 280ms var(--ease);
+}
