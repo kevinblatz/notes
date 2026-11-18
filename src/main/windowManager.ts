@@ -63,6 +63,8 @@ export class WindowManager {
   private lastApplied: Rect | null = null
   /** When monitors last changed. Moves that Windows makes in response are not the user's. */
   private displaysChangedAt = 0
+  /** A monitor change arrived while the window was maximized; it is dealt with once the window is restored. */
+  private displayCheckOwed = false
   private saveTimer: NodeJS.Timeout | null = null
   private displayTimer: NodeJS.Timeout | null = null
   private flushWaiters = new Map<string, (saved: boolean) => void>()
@@ -146,9 +148,11 @@ export class WindowManager {
     }
     win.on('show', reassertTopmost)
     win.on('restore', reassertTopmost)
-    // Work-area changes are skipped while maximized; catch up once the user restores the window.
+    // Monitor changes are skipped while maximized; catch up once the window is restored.
     win.on('unmaximize', () => {
-      if (this.dock !== 'custom') this.scheduleDisplayCheck()
+      if (!this.displayCheckOwed) return
+      this.displayCheckOwed = false
+      setTimeout(() => this.afterRestore(), 150)
     })
 
     const displaysChanged = (): void => this.scheduleDisplayCheck()
@@ -208,14 +212,43 @@ export class WindowManager {
     return displayForBounds(win.getNormalBounds(), displays) ?? toInfo(screen.getDisplayMatching(win.getBounds())) ?? primary
   }
 
-  private scheduleSave(): void {
+  /** True while Windows may still be rearranging windows after a monitor change. */
+  private displaysSettling(): boolean {
+    return this.displayTimer !== null || Date.now() - this.displaysChangedAt < DISPLAY_SETTLE_MS
+  }
+
+  private scheduleSave(delay = 350): void {
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null
+      if (this.displaysSettling()) {
+        // Too early to tell whose move this was. Look again once things have settled, so the
+        // remembered dock side always ends up matching where the window really is.
+        this.scheduleSave(Math.max(350, DISPLAY_SETTLE_MS - (Date.now() - this.displaysChangedAt) + 50))
+        return
+      }
       this.detectDock()
       this.persistState()
       this.options.onStatusChange()
-    }, 350)
+    }, delay)
+  }
+
+  /**
+   * The window left the maximized state after a monitor change it sat out. Restored with its
+   * button it is back exactly where the app last put it, so it can follow the changed work
+   * area. Dragged out of the maximized state it is being moved by hand and is left alone.
+   */
+  private afterRestore(): void {
+    const win = this.window
+    if (!win || win.isMinimized()) return
+    if (win.isMaximized()) {
+      this.displayCheckOwed = true
+      return
+    }
+    const bounds = win.getNormalBounds()
+    const movedByHand = !rectsEqual(bounds, this.lastApplied)
+    if (movedByHand && isUsablyVisible(bounds, this.displays())) return
+    this.reconcileDisplays()
   }
 
   /** After the user moves or resizes the window, work out whether it still sits exactly on a half. */
@@ -224,7 +257,7 @@ export class WindowManager {
     if (!win || win.isMinimized()) return
     // While monitors are changing, Windows moves and resizes windows itself. That is not the
     // user un-docking the notes; reconcileDisplays() decides where the window belongs.
-    if (this.displayTimer || Date.now() - this.displaysChangedAt < DISPLAY_SETTLE_MS) return
+    if (this.displaysSettling()) return
     const bounds = win.getNormalBounds()
     // Still exactly where the app put it: nothing was moved by hand, whatever Windows rounded.
     if (rectsEqual(bounds, this.lastApplied)) return
@@ -264,12 +297,9 @@ export class WindowManager {
   }
 
   private scheduleDisplayCheck(): void {
+    // From here until things settle, moves are not classified (see scheduleSave): a move that
+    // Windows makes because of this change must not be mistaken for the user un-docking.
     this.displaysChangedAt = Date.now()
-    // A move caused by this display change must not be classified before the check below runs.
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer)
-      this.saveTimer = null
-    }
     if (this.displayTimer) clearTimeout(this.displayTimer)
     this.displayTimer = setTimeout(() => {
       this.displayTimer = null
@@ -287,7 +317,12 @@ export class WindowManager {
     // A maximized window already fills its work area, and Windows keeps it that way. It is
     // left alone: un-maximizing it here would change (and on Windows could show or activate)
     // the window without anyone asking.
-    if (!win || win.isMinimized() || win.isMaximized()) return
+    if (!win || win.isMinimized()) return
+    if (win.isMaximized()) {
+      this.displayCheckOwed = true
+      return
+    }
+    this.displayCheckOwed = false
     const displays = this.displays()
     if (displays.length === 0) return
     const bounds = win.getNormalBounds()

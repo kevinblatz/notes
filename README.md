@@ -12,7 +12,7 @@ the *Trading-Notes-Windows* artifact.)
 
 | File | Use it when |
 | --- | --- |
-| `Trading-Notes-Setup-x.y.z.exe` | You want a normal install with Start menu and desktop shortcuts and an uninstaller. Installs for your user only; no administrator rights needed. |
+| `Trading-Notes-Setup-x.y.z.exe` | You want a normal install with Start menu and desktop shortcuts and an uninstaller. The installer asks whether to install just for you (the default, no administrator rights needed) or for everyone on the computer. |
 | `Trading-Notes-Portable-x.y.z.exe` | You want a single file you can run from anywhere without installing. |
 
 The app is not code-signed, so the first time you run it Windows SmartScreen may show
@@ -55,6 +55,7 @@ ask for them with the shortcut.
 | Click the tray icon | Show or hide the notes. Right-click for dock side, always-on-top and Quit. |
 | Close button, or Alt + F4 | Hide to the tray. Your notes are saved first. |
 | Gear, then **Quit Trading Notes** | Actually exit. |
+| **Ctrl + ,** | Open Settings: shortcut, dock side, always on top, start with Windows, theme, font and size. |
 
 **Writing**
 
@@ -72,6 +73,7 @@ ask for them with the shortcut.
 | Bar under the note | Paragraph style, font, size, lists, checklists, link, add image, undo and redo. |
 | Click an image, drag its corner | Resize it (the proportions are kept). Type under it to add a caption. |
 | **Ctrl + click** a link while editing | Open it in your browser. On the board a plain click opens it. |
+| *Add tag*, under the note | Label the note (Rules, Setups and Journal are suggested; any word works). Find can filter by tag. |
 
 Notes save themselves as you type. *Log note* is just the way back to the board; it is not the
 only thing that saves. A new note you leave completely empty is thrown away; a note with only a
@@ -87,6 +89,7 @@ screenshot is kept.
 | **Alt + Arrow keys** on a focused note | The same moves from the keyboard (Tab reaches each note). |
 | **Ctrl + Z** on the board, or *Undo* in the message | Undo the last move or delete. |
 | **Delete** on a focused note | Move it to Trash. |
+| Gear, then **Trash** | Get a deleted note back (*Restore* puts it where it was), or delete it for good. Nothing leaves Trash by itself. |
 
 When the window is narrow, a side-by-side pair is shown stacked; it goes back to side by side
 when the window is wide enough again.

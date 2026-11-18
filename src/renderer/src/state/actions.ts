@@ -8,7 +8,7 @@ import type { BoardLayout, Note, Placement, Preferences } from '@shared/types'
 import { api } from '../lib/api'
 import { captureBoardPositions } from '../lib/flip'
 import { newId } from '../lib/ids'
-import { cleanMessage, type NoteSaver } from './saver'
+import { cleanMessage, type NoteSaver, type SaveState } from './saver'
 import { getState, setState, type CaretHint, type Panel, type Toast, type UndoEntry } from './store'
 
 const MAX_UNDO = 30
@@ -19,6 +19,18 @@ let spotlightCounter = 0
 let activeSaver: NoteSaver | null = null
 export function setActiveSaver(saver: NoteSaver | null): void {
   activeSaver = saver
+}
+
+let reportedUnsaved = false
+/**
+ * Keep the main process informed about whether the open note holds writing that is not
+ * stored yet. When Windows shuts down there is no time to ask, so it goes by the last report.
+ */
+export function noteSaveState(state: SaveState): void {
+  const unsaved = state.kind === 'pending' || state.kind === 'saving' || state.kind === 'error'
+  if (unsaved === reportedUnsaved) return
+  reportedUnsaved = unsaved
+  api.reportUnsaved(unsaved)
 }
 
 // ---------------------------------------------------------------- startup
@@ -58,6 +70,7 @@ export async function initialize(restoreSession = true): Promise<void> {
 /** Reload everything after an import replaced or extended the collection. */
 export async function reloadAfterImport(): Promise<void> {
   activeSaver = null
+  noteSaveState({ kind: 'idle' })
   setState({ view: { mode: 'board' }, undo: [], preview: null, recoveredNotice: false })
   void api.setSession(null)
   await initialize(false)

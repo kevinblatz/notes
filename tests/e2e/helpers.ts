@@ -46,9 +46,12 @@ interface TestHandle {
   library: {
     db: { getLayout: () => { rows: Array<{ id: string; notes: string[] }> }; getPins: () => string[]; countTrash: () => number }
     listLive: () => Array<{ id: string; title: string | null; plainText: string; content: unknown; revision: number; tags: string[] }>
+    getSession: () => { cleanExit: boolean; openNoteId: string | null }
   }
   windows: { toggle: () => void; isShown: () => boolean; reconcileDisplays: () => void; dockTo: (side: 'left' | 'right') => void; status: () => unknown }
   shortcuts: { status: () => { accelerator: string; registered: boolean; error: string | null } }
+  /** Null where the desktop has no tray. The test* calls do what a real click on the icon or a menu entry does. */
+  tray: { testClick: () => void; testMenu: () => Array<{ label: string; checked: boolean }>; testChoose: (label: string) => boolean; state: () => { created: boolean; iconLoaded: boolean } } | null
   testHooks: { failSaves: boolean; quitChoice: 'ask' | 'keep' | 'quit' }
   quit: () => Promise<void>
 }

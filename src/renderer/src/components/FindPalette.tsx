@@ -158,7 +158,7 @@ export function FindPalette({ mode }: { mode: 'find' | 'pins' }) {
   // pinned entry (or the Pinned tab when nothing is pinned yet).
   useEffect(() => {
     if (mode === 'find') input.current?.focus()
-    else panel.current?.querySelector<HTMLElement>('.pin-open, [role="tab"][aria-selected="true"]')?.focus()
+    else (panel.current?.querySelector<HTMLElement>('.pin-open') ?? panel.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))?.focus()
   }, [mode])
 
   const all = useMemo(() => Object.values(notes), [notes])

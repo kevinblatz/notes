@@ -48,6 +48,8 @@ interface PopoverProps {
   label?: string
   /** Keep focus where it is (used by the text-selection controls so the editor keeps its selection). */
   keepFocus?: boolean
+  /** Close on any scroll outside the panel. For a menu opened at a point in scrolling content. */
+  closeOnScroll?: boolean
   children: ReactNode
 }
 
@@ -55,7 +57,7 @@ interface PopoverProps {
  * A floating panel attached to its trigger. It is drawn inside the notes window (fixed to
  * the viewport and clamped to its edges), never as a separate OS window.
  */
-export function Popover({ anchor, open, onClose, placement = 'bottom', align = 'start', className, role = 'dialog', label, keepFocus, children }: PopoverProps) {
+export function Popover({ anchor, open, onClose, placement = 'bottom', align = 'start', className, role = 'dialog', label, keepFocus, closeOnScroll, children }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null)
   // Until it has been measured and placed, the panel is transparent rather than hidden: a
   // hidden element cannot take keyboard focus, and menus must be focusable the moment they open.
@@ -102,7 +104,7 @@ export function Popover({ anchor, open, onClose, placement = 'bottom', align = '
       // Close only when the thing the panel is attached to has actually moved. A menu on the
       // title bar stays open while the board underneath scrolls.
       const now = anchor?.getBoundingClientRect()
-      if (anchoredAt && now && Math.abs(now.top - anchoredAt.top) < 2 && Math.abs(now.left - anchoredAt.left) < 2) return
+      if (!closeOnScroll && anchoredAt && now && Math.abs(now.top - anchoredAt.top) < 2 && Math.abs(now.left - anchoredAt.left) < 2) return
       onClose()
     }
     window.addEventListener('pointerdown', onPointerDown, true)
@@ -113,7 +115,7 @@ export function Popover({ anchor, open, onClose, placement = 'bottom', align = '
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', reposition)
     }
-  }, [open, anchor, onClose, reposition])
+  }, [open, anchor, onClose, reposition, closeOnScroll])
 
   useEscape(open, () => {
     onClose()

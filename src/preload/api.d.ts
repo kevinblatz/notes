@@ -49,6 +49,8 @@ export interface TnApi {
   edit(command: EditCommand): Promise<void>
   /** Answer a flush request: `saved` is false when the pending edit could not be written. */
   flushDone(token: string, saved: boolean): void
+  /** Tell the main process whether the open note holds writing that is not stored yet. */
+  reportUnsaved(unsaved: boolean): void
   on<K extends keyof MainEvents>(name: K, listener: (payload: MainEvents[K]) => void): () => void
 }
 

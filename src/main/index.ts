@@ -154,7 +154,20 @@ async function main(): Promise<void> {
     tray?.refresh()
   }
 
-  registerIpc({ library: lib, windows: manager, shortcuts, session: sessionInfo, applyPreferences, quit: () => void quit(), testHooks })
+  // Kept up to date by the window, so that it can be read at a moment when there is no time to ask.
+  let unsavedInWindow = false
+  registerIpc({
+    library: lib,
+    windows: manager,
+    shortcuts,
+    session: sessionInfo,
+    applyPreferences,
+    quit: () => void quit(),
+    setUnsaved: (unsaved) => {
+      unsavedInWindow = unsaved
+    },
+    testHooks
+  })
 
   // Keep the stored preference honest if the startup entry was removed outside the app.
   const prefs = lib.getPreferences()
@@ -165,17 +178,16 @@ async function main(): Promise<void> {
   const startMode: ShowMode = process.argv.includes('--hidden') ? 'hidden' : process.argv.includes(AUTOSTART_ARG) ? 'inactive' : 'focus'
   const win = manager.create(startMode)
 
-  // Windows is logging off or shutting down: there is no time to ask anything, so write what
-  // we can and record a clean exit only if the window confirmed that everything was saved.
-  let savedBeforeSessionEnd = false
+  // Windows is logging off or shutting down: there is no time to ask anything. Have the window
+  // write what is pending, and record a clean exit unless the window last reported writing
+  // that is not stored. (The answer to the request may not arrive before Windows ends the
+  // session, so the decision rests on what the window has already reported.)
   win.on('query-session-end', () => {
-    void manager.requestFlush(1000).then((outcome) => {
-      savedBeforeSessionEnd = outcome === 'saved' || outcome === 'unavailable'
-    })
+    void manager.requestFlush(1000)
   })
   win.on('session-end', () => {
     try {
-      if (savedBeforeSessionEnd) lib.setSession({ cleanExit: true })
+      if (!unsavedInWindow) lib.setSession({ cleanExit: true })
       lib.db.checkpoint()
     } catch {
       // Nothing more can be done this late.
@@ -235,6 +247,6 @@ async function main(): Promise<void> {
 
   if (isTest) {
     // Handles for the automated desktop tests. Never present in a normal run.
-    ;(globalThis as Record<string, unknown>).__tnTest = { library: lib, windows: manager, shortcuts, testHooks, quit }
+    ;(globalThis as Record<string, unknown>).__tnTest = { library: lib, windows: manager, shortcuts, tray, testHooks, quit }
   }
 }

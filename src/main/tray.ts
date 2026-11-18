@@ -1,5 +1,5 @@
 /** Notification-area icon: left click shows or hides the notes, right click opens a small menu. */
-import { Menu, nativeImage, Tray } from 'electron'
+import { Menu, nativeImage, Tray, type MenuItem } from 'electron'
 import type { DockSide } from '@shared/types'
 
 export interface TrayActions {
@@ -13,6 +13,7 @@ export interface TrayActions {
 
 export class TrayController {
   private tray: Tray | null = null
+  private menu: Menu | null = null
   private iconLoaded = false
 
   constructor(
@@ -47,6 +48,7 @@ export class TrayController {
       { type: 'separator' },
       { label: 'Quit Trading Notes', click: () => this.actions.quit() }
     ])
+    this.menu = menu
     this.tray.setContextMenu(menu)
   }
 
@@ -55,8 +57,27 @@ export class TrayController {
     return { created: this.tray !== null && !this.tray.isDestroyed(), iconLoaded: this.iconLoaded }
   }
 
+  /** For the automated desktop tests: do exactly what a click on the icon does. */
+  testClick(): void {
+    this.tray?.emit('click')
+  }
+
+  /** For the automated desktop tests: the menu as it currently reads. */
+  testMenu(): { label: string; checked: boolean }[] {
+    return (this.menu?.items ?? []).filter((item) => item.type !== 'separator').map((item) => ({ label: item.label, checked: item.checked }))
+  }
+
+  /** For the automated desktop tests: choose a menu entry by its label, as a click on it would. */
+  testChoose(label: string): boolean {
+    const item: MenuItem | undefined = this.menu?.items.find((entry) => entry.label === label)
+    if (!item) return false
+    item.click()
+    return true
+  }
+
   destroy(): void {
     this.tray?.destroy()
     this.tray = null
+    this.menu = null
   }
 }

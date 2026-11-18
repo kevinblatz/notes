@@ -23,7 +23,7 @@ import {
   Undo2,
   Unlink
 } from 'lucide-react'
-import { useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { FONT_KEYS, FONT_LABELS, FONT_SIZES, fontVar, HIGHLIGHT_COLORS, highlightVar, INK_COLORS, inkVar, safeLinkHref } from '@shared/content'
 import { api } from '../../lib/api'
 import { useEscape } from '../../lib/escape'
@@ -254,6 +254,26 @@ export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: 
 export function SelectionBubble({ editor }: { editor: Editor }) {
   const state = useFormatState(editor)
   const [row, setRow] = useState<'ink' | 'highlight' | 'link' | null>(null)
+  const bubble = useRef<HTMLDivElement>(null)
+  // The row belongs to the selection bar. When the bar goes away (the selection is gone, or
+  // the keyboard left the note) the row goes with it, together with its claim on Esc below.
+  useEffect(() => {
+    const onTransaction = (): void => {
+      const { selection } = editor.state
+      if (selection.empty || 'node' in selection) setRow(null)
+    }
+    const onBlur = ({ event }: { event: FocusEvent }): void => {
+      const next = event.relatedTarget
+      if (next instanceof Node && bubble.current?.contains(next)) return
+      setRow(null)
+    }
+    editor.on('transaction', onTransaction)
+    editor.on('blur', onBlur)
+    return () => {
+      editor.off('transaction', onTransaction)
+      editor.off('blur', onBlur)
+    }
+  }, [editor])
   // Esc closes the open colour or link row first, not the note behind it.
   useEscape(row !== null, () => {
     setRow(null)
@@ -276,7 +296,7 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
         return !('node' in s.selection)
       }}
     >
-      <div className="bubble" role="toolbar" aria-label="Selection formatting">
+      <div ref={bubble} className="bubble" role="toolbar" aria-label="Selection formatting">
         <div className="bubble-row">
           <IconButton label="Bold" active={state.bold} onMouseDown={keepSelection} onClick={run((c) => c.toggleBold())}><Bold size={15} /></IconButton>
           <IconButton label="Italic" active={state.italic} onMouseDown={keepSelection} onClick={run((c) => c.toggleItalic())}><Italic size={15} /></IconButton>

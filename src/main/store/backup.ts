@@ -71,7 +71,7 @@ const zNote = z.object({
   createdAt: z.number(),
   updatedAt: z.number(),
   deletedAt: z.number().nullable().default(null),
-  trashOrigin: z.object({ rowIndex: z.number(), slot: z.number(), partnerId: z.string().nullable() }).nullable().default(null),
+  trashOrigin: z.object({ rowIndex: z.number(), slot: z.number(), partnerId: z.string().nullable(), previousNoteId: z.string().nullable().optional() }).nullable().default(null),
   revision: z.number().default(1),
   extra: z.record(z.string(), z.unknown()).default({})
 })

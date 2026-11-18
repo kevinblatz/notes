@@ -70,6 +70,8 @@ export interface IpcContext {
   /** Apply preference side effects (topmost flag, startup entry, shortcut). */
   applyPreferences: (previous: Preferences, next: Preferences) => void
   quit: () => void
+  /** The window reports whether the open note holds writing that is not stored yet. */
+  setUnsaved: (unsaved: boolean) => void
   /** Test-only switches; all false in normal use. */
   testHooks: { failSaves: boolean; quitChoice: 'ask' | 'keep' | 'quit' }
 }
@@ -317,6 +319,11 @@ export function registerIpc(context: IpcContext): void {
     if (event.sender !== windows.window?.webContents || typeof token !== 'string') return
     // Anything other than an explicit "false" counts as saved (nothing was pending).
     windows.confirmFlush(token, saved !== false)
+  })
+
+  ipcMain.on(IPC.unsaved, (event, unsaved: unknown) => {
+    if (event.sender !== windows.window?.webContents || typeof unsaved !== 'boolean') return
+    context.setUnsaved(unsaved)
   })
 
 }

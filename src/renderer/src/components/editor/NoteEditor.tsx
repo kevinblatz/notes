@@ -14,7 +14,7 @@ import { api } from '../../lib/api'
 import { overlayDepth, useEscape } from '../../lib/escape'
 import { ACCEPT_ATTRIBUTE, hasFiles, imageFilesFrom } from '../../lib/images'
 import { sanitizePastedHtml } from '../../lib/pasteSanitizer'
-import { noteSaved, returnToBoard, setActiveSaver, toast } from '../../state/actions'
+import { noteSaved, noteSaveState, returnToBoard, setActiveSaver, toast } from '../../state/actions'
 import { NoteSaver, type SaveState } from '../../state/saver'
 import { getState, useStore, type View } from '../../state/store'
 import { MenuList, Popover } from '../ui'
@@ -192,7 +192,10 @@ export function NoteEditor({ view }: { view: NoteView }) {
       existing: initial,
       placement: view.placement,
       read: () => ({ title: titleRef.current.trim() || null, content: editor.getJSON() as RichDoc, tags: tagsRef.current }),
-      onState: setSaveState,
+      onState: (state) => {
+        setSaveState(state)
+        noteSaveState(state)
+      },
       onSaved: noteSaved
     })
     saverRef.current = saver
@@ -350,7 +353,7 @@ export function NoteEditor({ view }: { view: NoteView }) {
       />
 
       <span ref={menuAnchor} className="context-anchor" style={menu ? { left: menu.x, top: menu.y } : undefined} />
-      <Popover anchor={menuAnchor.current} open={menu !== null} onClose={closeMenu} role="menu" label="Edit" keepFocus>
+      <Popover anchor={menuAnchor.current} open={menu !== null} onClose={closeMenu} role="menu" label="Edit" keepFocus closeOnScroll>
         <MenuList
           onDone={closeMenu}
           keepFocus

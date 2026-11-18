@@ -10,6 +10,9 @@ import { flushAll, reloadAfterImport } from '../state/actions'
 import { cleanMessage } from '../state/saver'
 import { Sheet } from './Sheet'
 
+/** Shown when the note being written cannot be stored: a backup taken now would miss its newest text. */
+const UNSAVED_NOTE = 'The note you are writing could not be saved yet, so nothing was done. Go back to it and use Try again first.'
+
 const plural = (count: number, one: string, many = `${one}s`): string => `${count} ${count === 1 ? one : many}`
 const megabytes = (bytes: number): string => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`)
 
@@ -36,7 +39,7 @@ export function BackupPanel() {
 
   const doExport = (): Promise<void> =>
     run('Exporting…', async () => {
-      await flushAll()
+      if (!(await flushAll())) throw new Error(UNSAVED_NOTE)
       const outcome = await api.exportBackup()
       if (outcome.canceled) return
       // A new attempt replaces whatever the previous one reported.
@@ -59,7 +62,7 @@ export function BackupPanel() {
   const doImport = (): Promise<void> =>
     run(mode === 'replace' ? 'Restoring…' : 'Importing…', async () => {
       if (!preview) return
-      await flushAll()
+      if (!(await flushAll())) throw new Error(UNSAVED_NOTE)
       const outcome = await api.runImport(preview.token, mode)
       setPreview(null)
       if (!outcome.ok) throw new Error(outcome.error ?? 'The import did not complete.')

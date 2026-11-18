@@ -24,6 +24,7 @@ export const IPC = {
   showInFolder: 'tn:show-in-folder',
   edit: 'tn:edit',
   flushDone: 'tn:flush-done',
+  unsaved: 'tn:unsaved',
   /** main -> window */
   event: 'tn:event'
 } as const
