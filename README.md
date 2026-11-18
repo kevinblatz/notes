@@ -75,7 +75,7 @@ ask for them with the shortcut.
 | **Ctrl + click** a link while editing | Open it in your browser. On the board a plain click opens it. |
 | *Add tag*, under the note | Label the note (Rules, Setups and Journal are suggested; any word works). Find can filter by tag. |
 
-Notes save themselves as you type. *Log note* is just the way back to the board; it is not the
+Notes save themselves as you type (within about half a second). *Log note* is just the way back to the board; it is not the
 only thing that saves. A new note you leave completely empty is thrown away; a note with only a
 screenshot is kept.
 
@@ -140,7 +140,8 @@ Screenshots that no note uses any more are kept for 14 days before the app tidie
 so an image you cut from one note can still be pasted into another later.
 
 **What "saved" means.** While you type, a note is written about half a second after you pause,
-and immediately when you log it, hide the window or quit. If the app or Windows stops
+at least every second and a half if you keep typing without a pause, and immediately when you
+log it, hide the window or quit. If the app or Windows stops
 unexpectedly, the next start opens the note you were writing as it was last saved; at most the
 last moment of typing before the stop can be missing. If a save fails (for example the disk is
 full), the note stays open with a "Not saved" message and a *Try again* button, and it never

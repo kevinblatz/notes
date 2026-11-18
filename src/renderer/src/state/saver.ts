@@ -2,6 +2,7 @@
  * Autosave for the note being edited.
  *
  * - Edits are written after a short pause in typing (DEBOUNCE_MS), and immediately on demand.
+ *   Someone typing without ever pausing still gets a save at least every MAX_WAIT_MS.
  * - Only one save is ever in flight. A save always sends the newest content at the moment it
  *   starts, and names the revision it is based on, so an older write can never replace
  *   newer typing: the main process rejects any save whose base revision is out of date.
@@ -14,6 +15,8 @@ import type { BoardLayout, Note, Placement, RichDoc } from '@shared/types'
 import { api } from '../lib/api'
 
 export const DEBOUNCE_MS = 450
+/** Longest that typed text waits for its first save attempt, however fast the typing. */
+export const MAX_WAIT_MS = 1500
 const RETRY_DELAYS = [1500, 4000, 10000, 20000]
 
 export interface DraftSnapshot {
@@ -42,6 +45,8 @@ export interface SaverOptions {
 export class NoteSaver {
   private revision: number | null
   private dirty = false
+  /** When the oldest change that has not been sent for saving was made. */
+  private dirtySince: number | null = null
   private timer: number | null = null
   private retryTimer: number | null = null
   private running: Promise<boolean> | null = null
@@ -69,12 +74,16 @@ export class NoteSaver {
   /** Note that the content changed; a save follows after a short pause. */
   touch(): void {
     this.dirty = true
+    const now = Date.now()
+    if (this.dirtySince === null) this.dirtySince = now
     if (this.state.kind !== 'saving' && this.state.kind !== 'error') this.setState({ kind: 'pending' })
     if (this.timer !== null) window.clearTimeout(this.timer)
+    // Wait for a pause in typing, but never longer than MAX_WAIT_MS since the oldest unsaved change.
+    const delay = Math.max(0, Math.min(DEBOUNCE_MS, MAX_WAIT_MS - (now - this.dirtySince)))
     this.timer = window.setTimeout(() => {
       this.timer = null
       void this.run()
-    }, DEBOUNCE_MS)
+    }, delay)
   }
 
   /** Write now. Resolves true once everything typed so far is stored (or there was nothing to store). */
@@ -105,6 +114,7 @@ export class NoteSaver {
   private async saveLoop(): Promise<boolean> {
     while (this.dirty) {
       this.dirty = false
+      this.dirtySince = null
       const snapshot = this.options.read()
       try {
         if (this.revision === null) {
