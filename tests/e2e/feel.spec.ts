@@ -27,8 +27,8 @@ test.afterEach(async () => {
   await ctx.quit()
 })
 
-type Family = 'arrow' | 'pointer' | 'text' | 'write' | 'grab' | 'grabbing'
-const FAMILY: Family[] = ['arrow', 'pointer', 'text', 'write', 'grab', 'grabbing']
+type Family = 'arrow' | 'pointer' | 'text' | 'write' | 'write-down' | 'grab' | 'grabbing'
+const FAMILY: Family[] = ['arrow', 'pointer', 'text', 'write', 'write-down', 'grab', 'grabbing']
 
 /** The computed `cursor` value a family member resolves to in the current theme. */
 async function familyCursor(page: Page, name: Family): Promise<string> {
@@ -61,6 +61,22 @@ const runningAnimations = (page: Page): Promise<string[]> =>
       .filter((a) => a.playState === 'running')
       .map((a) => `${(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id} on ${String(((a.effect as KeyframeEffect | null)?.target as Element | null)?.className ?? '?')}`)
   )
+
+/**
+ * Record every CSS animation and transition that starts from now on, as
+ * "animation:<name>" and "transition:<property>:<tag>". Independent of timing.
+ */
+async function recordMotion(page: Page): Promise<() => Promise<string[]>> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __motion?: string[] }
+    if (w.__motion) return
+    const log: string[] = []
+    document.addEventListener('animationstart', (event) => log.push(`animation:${event.animationName}`), true)
+    document.addEventListener('transitionrun', (event) => log.push(`transition:${event.propertyName}:${(event.target as Element).tagName.toLowerCase()}`), true)
+    w.__motion = log
+  })
+  return () => page.evaluate(() => (window as unknown as { __motion: string[] }).__motion.splice(0))
+}
 
 /** A point in the open board space under the last note, in viewport coordinates. */
 async function openSpace(page: Page): Promise<{ x: number; y: number }> {
@@ -152,7 +168,7 @@ test('one cursor family: the nib on empty space, the hand on notes and buttons, 
       expect(hx!).toBeLessThan(w1!)
       expect(hy!).toBeLessThan(h1!)
     }
-    // Six different cursors, drawn in this theme's own colours.
+    // Seven different cursors, drawn in this theme's own colours.
     expect(new Set(Object.values(values)).size).toBe(FAMILY.length)
     nibs.add(values.write)
 
@@ -161,6 +177,15 @@ test('one cursor family: the nib on empty space, the hand on notes and buttons, 
     await page.mouse.move(space.x, space.y)
     expect((await cursorAt(page, space.x, space.y)).cursor).toBe(values.write)
     expect(values.write).toMatch(/, text$/)
+    // Pressing touches the nib down (same hotspot); moving away before letting go writes nothing.
+    await page.mouse.down()
+    expect((await cursorAt(page, space.x, space.y)).cursor).toBe(values['write-down'])
+    expect(/\) (\d+ \d+), text$/.exec(values['write-down'])![1]).toBe(/\) (\d+ \d+), text$/.exec(values.write)![1])
+    await page.mouse.move(space.x + 60, space.y, { steps: 3 })
+    await page.mouse.up()
+    await expect(focusView(page)).toBeHidden()
+    await page.mouse.move(space.x, space.y)
+    expect((await cursorAt(page, space.x, space.y)).cursor).toBe(values.write)
 
     // A note card: the pointing hand on the sheet and its title, the I-beam over its text.
     const box = (await card.boundingBox())!
@@ -179,9 +204,6 @@ test('one cursor family: the nib on empty space, the hand on notes and buttons, 
     expect((await cursorAt(page, pin.x + pin.width / 2, pin.y + pin.height / 2)).cursor).toBe(values.pointer)
     const gear = (await page.getByTestId('gear').boundingBox())!
     expect((await cursorAt(page, gear.x + gear.width / 2, gear.y + gear.height / 2)).cursor).toBe(values.pointer)
-
-    // The title bar's open space: the arrow.
-    expect((await cursorAt(page, 200, 12)).cursor).toBe(values.arrow)
   }
   expect(nibs.size).toBe(3)
 
@@ -195,6 +217,8 @@ test('one cursor family: the nib on empty space, the hand on notes and buttons, 
   expect((await cursorAt(page, titleField.x + 40, titleField.y + titleField.height / 2)).cursor).toBe(text)
   const log = (await page.getByRole('button', { name: /Log note/ }).boundingBox())!
   expect((await cursorAt(page, log.x + 10, log.y + log.height / 2)).cursor).toBe(await familyCursor(page, 'pointer'))
+  // The bar around those buttons: the arrow.
+  expect((await cursorAt(page, log.x - 160, log.y + log.height / 2)).cursor).toBe(await familyCursor(page, 'arrow'))
 
   // Nothing on screen falls back to the system's version of a cursor the family draws.
   const strays = await page.evaluate(() =>
@@ -309,37 +333,42 @@ test('ticking, pinning and pressing give feedback without moving anything, and t
   await expect(card.locator('input[type="checkbox"]')).toHaveCount(2)
   await expect.poll(() => runningAnimations(page)).toEqual([])
 
-  // Tick: the box and the text animate, the layout does not move, and it settles.
+  const motion = await recordMotion(page)
+
+  // Tick: the box springs, a soft ring spreads, the text fades to done; nothing moves.
   const size = (): Promise<{ height: number; width: number }> => card.evaluate((element) => ({ height: (element as HTMLElement).offsetHeight, width: (element as HTMLElement).offsetWidth }))
   const before = await size()
   const box = card.locator('input[type="checkbox"]').first()
   await box.click()
   await expect(box).toBeChecked()
-  const ticking = await runningAnimations(page)
-  expect(ticking.some((name) => name.includes('box-shadow'))).toBe(true)
   expect(await size()).toEqual(before)
   await expect(card.locator('li[data-checked="true"] > div')).toHaveCSS('text-decoration-line', 'line-through')
   await expect.poll(() => runningAnimations(page)).toEqual([])
+  expect(await motion()).toEqual(expect.arrayContaining(['transition:box-shadow:input', 'transition:transform:input', 'transition:color:div', 'transition:text-decoration-color:div']))
 
   // Pin: one pop on the pin, and only for pinning.
   await card.hover({ position: { x: 30, y: 12 } })
   await card.getByRole('button', { name: 'Pin', exact: true }).click()
-  await expect(card.getByRole('button', { name: 'Unpin' })).toHaveClass(/is-popping/)
+  await expect(card.getByRole('button', { name: 'Unpin' })).toBeVisible()
   await expect(card.locator('.is-popping')).toHaveCount(0, { timeout: 1500 })
+  expect((await motion()).filter((entry) => entry.startsWith('animation:')).sort()).toEqual(['animation:pin-pop', 'animation:pin-ring'])
   await card.getByRole('button', { name: 'Unpin' }).click()
-  await expect(card.getByRole('button', { name: 'Pin', exact: true })).not.toHaveClass(/is-popping/)
+  await expect(card.getByRole('button', { name: 'Pin', exact: true })).toBeVisible()
+  await expect.poll(() => runningAnimations(page)).toEqual([])
+  expect((await motion()).filter((entry) => entry.startsWith('animation:'))).toEqual([])
   await card.getByRole('button', { name: 'Pin', exact: true }).click()
   await expect(card.locator('.is-popping')).toHaveCount(0, { timeout: 1500 })
   await expect.poll(() => runningAnimations(page)).toEqual([])
+  await motion()
 
   // Leaving the board and coming back replays none of it (the board is hidden meanwhile).
   await card.locator('.prose li p').first().click()
   await expect(focusView(page)).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(focusView(page)).toBeHidden()
-  await page.waitForTimeout(100)
-  const ours = /^(ink-|pin-|note-bloom|box-shadow|text-decoration-color)/
-  expect((await runningAnimations(page)).filter((name) => ours.test(name))).toEqual([])
+  await page.waitForTimeout(600)
+  const replayed = (await motion()).filter((entry) => /pin-|ink-|note-bloom|box-shadow|text-decoration/.test(entry))
+  expect(replayed).toEqual([])
 
   // Press: a text button shrinks a touch but keeps its place and its full hit area, so a
   // press that starts right at its edge still counts.
@@ -386,11 +415,14 @@ test('with Reduced motion on there is no ink drop, no bloom and nothing animates
     }).observe(document.body, { childList: true, subtree: true })
     ;(window as unknown as { __ink: string[] }).__ink = seen
   })
+  const motion = await recordMotion(page)
+  const ours = (entries: string[]): string[] => entries.filter((entry) => /animation:(ink-|pin-|note-bloom)/.test(entry))
   const space = await openSpace(page)
   await page.mouse.click(space.x, space.y)
   await expect(focusView(page)).toBeVisible()
   await expect(editorBody(page)).toBeFocused()
   expect(await page.evaluate(() => (window as unknown as { __ink: string[] }).__ink)).toEqual([])
+  expect(ours(await motion())).toEqual([])
   await expect(page.locator('html')).not.toHaveAttribute('data-bloom')
   // The note view's opening is instant.
   expect(await focusView(page).evaluate((element) => parseFloat(getComputedStyle(element).animationDuration))).toBeLessThan(0.01)
@@ -403,8 +435,10 @@ test('with Reduced motion on there is no ink drop, no bloom and nothing animates
   await card.locator('input[type="checkbox"]').click()
   await card.hover({ position: { x: 30, y: 12 } })
   await card.getByRole('button', { name: 'Pin', exact: true }).click()
+  await expect(card.getByRole('button', { name: 'Unpin' })).toBeVisible()
   await expect(card.locator('.is-popping')).toHaveCount(0)
   await expect.poll(() => runningAnimations(page), { timeout: 300 }).toEqual([])
+  expect(ours(await motion())).toEqual([])
   // Transitions are instant.
   expect(await card.locator('input[type="checkbox"]').evaluate((element) => getComputedStyle(element).transitionDuration.split(', ').every((d) => parseFloat(d) < 0.01))).toBe(true)
 
@@ -424,6 +458,14 @@ test('the cursors and the drop work the same at 680 px, and dragging a note stil
   await writeNote(page, ['Bravo note'])
   const space = await openSpace(page)
   expect((await cursorAt(page, space.x, space.y)).cursor).toBe(await familyCursor(page, 'write'))
+  await expect(page.locator('.ink-layer')).toHaveCount(0, { timeout: 1500 }) // the drops from writing those notes
+  await page.mouse.click(space.x, space.y)
+  const drop = (await page.locator('.ink-layer .ink-drop').boundingBox())!
+  expect([Math.round(drop.x), Math.round(drop.y)]).toEqual([space.x, space.y])
+  await expect(focusView(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(focusView(page)).toBeHidden()
+  await expect(page.locator('.ink-layer')).toHaveCount(0, { timeout: 1500 })
   await dragNote(page, 'Bravo note', 'Alpha note', 0.5, 0.15)
   expect(await notes(page).evaluateAll((cards) => cards.map((card) => card.textContent?.trim()))).toEqual(['Bravo note', 'Alpha note'])
   await expect.poll(() => runningAnimations(page)).toEqual([])

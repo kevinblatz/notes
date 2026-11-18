@@ -11,7 +11,7 @@
  */
 import type { ThemeKey } from '@shared/types'
 
-export type CursorName = 'arrow' | 'pointer' | 'text' | 'write' | 'grab' | 'grabbing' | 'zoomIn' | 'zoomOut'
+export type CursorName = 'arrow' | 'pointer' | 'text' | 'write' | 'writeDown' | 'grab' | 'grabbing' | 'zoomIn' | 'zoomOut'
 
 /** Colours for one theme. Light cursors with a dark rim on the dark themes, the reverse on Paper. */
 interface Ink {
@@ -21,14 +21,16 @@ interface Ink {
   nib: string
   nibLine: string
   shine: string
+  /** The drop of ink under the nib while it is pressed to the page. */
+  blot: string
   shadow: string
   shadowOpacity: number
 }
 
 const INKS: Record<ThemeKey, Ink> = {
-  charcoal: { fill: '#f3eee4', rim: '#141516', nib: '#7cc3bc', nibLine: '#0d1c1b', shine: '#e9fbf8', shadow: '#000000', shadowOpacity: 0.4 },
-  midnight: { fill: '#f3eee4', rim: '#0a0b0c', nib: '#7cc3bc', nibLine: '#08100f', shine: '#e9fbf8', shadow: '#000000', shadowOpacity: 0.45 },
-  paper: { fill: '#24262a', rim: '#fdfcf9', nib: '#237069', nibLine: '#f3fbfa', shine: '#8fd0c9', shadow: '#2b2820', shadowOpacity: 0.3 }
+  charcoal: { fill: '#f3eee4', rim: '#141516', nib: '#7cc3bc', nibLine: '#0d1c1b', shine: '#e9fbf8', blot: '#5aa8a1', shadow: '#000000', shadowOpacity: 0.4 },
+  midnight: { fill: '#f3eee4', rim: '#0a0b0c', nib: '#7cc3bc', nibLine: '#08100f', shine: '#e9fbf8', blot: '#5aa8a1', shadow: '#000000', shadowOpacity: 0.45 },
+  paper: { fill: '#24262a', rim: '#fdfcf9', nib: '#237069', nibLine: '#f3fbfa', shine: '#8fd0c9', blot: '#1b5d57', shadow: '#2b2820', shadowOpacity: 0.3 }
 }
 
 interface Shape {
@@ -40,7 +42,7 @@ interface Shape {
 
 const rect = (x: number, y: number, w: number, h: number, r: number): Shape => {
   const base = `x='${x}' y='${y}' width='${w}' height='${h}' rx='${r}'`
-  return { rim: `<rect ${base} stroke-width='2'/>`, fill: `<rect ${base}/>` }
+  return { rim: `<rect ${base} stroke-width='2'/>`, fill: `<rect ${base} stroke='none'/>` }
 }
 
 const ring = (cx: number, cy: number, r: number, width: number): Shape => ({
@@ -151,21 +153,26 @@ function drawMagnifier(ink: Ink, plus: boolean): string {
 
 /**
  * The signature: a fountain-pen nib, tip on the hotspot, angled the way a pen is held.
- * Drawn upright (tip at the origin, pointing down) and turned 45 degrees.
+ * Drawn upright (tip at the origin, pointing down) and turned 45 degrees. While the mouse
+ * button is down on the page (`down`), the nib presses in a little and leaves a drop of ink.
  */
-const NIB_TIP: [number, number] = [2.5, 21.5]
-function drawNib(ink: Ink): string {
+const NIB_TIP: [number, number] = [3.5, 20.5]
+function drawNib(ink: Ink, down = false): string {
   const outline = 'M0 0 C-1 -3 -4.6 -7 -4.6 -10.8 L-4.6 -14.6 Q0 -16.3 4.6 -14.6 L4.6 -10.8 C4.6 -7 1 -3 0 0 Z'
   const section = 'M-4 -15.1 Q0 -16.7 4 -15.1 L3.8 -19 Q0 -20.1 -3.8 -19 Z'
   const turn = `translate(${NIB_TIP[0]} ${NIB_TIP[1]}) rotate(45)`
+  // The drop lies flat on the page under the tip, so it is drawn before the nib is turned.
+  const blot = down ? `<ellipse cx='${NIB_TIP[0] + 0.4}' cy='${NIB_TIP[1] + 0.4}' rx='3.1' ry='1.8' fill='${ink.blot}' stroke='${ink.nibLine}' stroke-width='0.7'/>` : ''
   const body =
+    blot +
     `<g transform='${turn}' stroke-linejoin='round'>` +
+    `<g transform='translate(0 ${down ? 0.8 : 0})'>` +
     `<path d='${section}' fill='${ink.fill}' stroke='${ink.rim}' stroke-width='1'/>` +
     `<path d='${outline}' fill='${ink.nib}' stroke='${ink.nibLine}' stroke-width='1'/>` +
     `<path d='M-3 -12.9 C-3 -9.6 -1.8 -6.7 -0.85 -4.7' fill='none' stroke='${ink.shine}' stroke-opacity='0.7' stroke-width='0.8' stroke-linecap='round'/>` +
     `<path d='M0 -1.5 V-8.5' stroke='${ink.nibLine}' stroke-width='0.9' stroke-linecap='round'/>` +
     `<circle cx='0' cy='-9.9' r='1.3' fill='${ink.nibLine}'/>` +
-    `</g>`
+    `</g></g>`
   const shadow = `<g transform='${turn}'><path d='${outline} ${section}' stroke-width='1'/></g>`
   return shadowOf(ink, shadow) + body
 }
@@ -174,7 +181,8 @@ export const CURSORS: Record<CursorName, CursorDef> = {
   arrow: { size: 24, hotspot: [2, 2], fallback: 'default', draw: drawArrow },
   pointer: { size: 24, hotspot: [8, 2], fallback: 'pointer', draw: drawPointer },
   text: { size: 24, hotspot: [11, 12], fallback: 'text', draw: drawText },
-  write: { size: 24, hotspot: [2, 21], fallback: 'text', draw: drawNib },
+  write: { size: 24, hotspot: [3, 20], fallback: 'text', draw: (ink) => drawNib(ink) },
+  writeDown: { size: 24, hotspot: [3, 20], fallback: 'text', draw: (ink) => drawNib(ink, true) },
   grab: { size: 24, hotspot: [12, 12], fallback: 'grab', draw: drawGrab },
   grabbing: { size: 24, hotspot: [12, 13], fallback: 'grabbing', draw: drawGrabbing },
   zoomIn: { size: 24, hotspot: [9, 9], fallback: 'zoom-in', draw: (ink) => drawMagnifier(ink, true) },
@@ -186,6 +194,7 @@ const PROPERTY: Record<CursorName, string> = {
   pointer: '--cursor-pointer',
   text: '--cursor-text',
   write: '--cursor-write',
+  writeDown: '--cursor-write-down',
   grab: '--cursor-grab',
   grabbing: '--cursor-grabbing',
   zoomIn: '--cursor-zoom-in',

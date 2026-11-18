@@ -23,6 +23,7 @@
   --cursor-pointer: pointer;
   --cursor-text: text;
   --cursor-write: text;
+  --cursor-write-down: text;
   --cursor-grab: grab;
   --cursor-grabbing: grabbing;
   --cursor-zoom-in: zoom-in;
