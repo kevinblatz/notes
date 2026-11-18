@@ -6,6 +6,7 @@
  * imported note, so nothing the renderer or a backup file sends can introduce an unknown
  * node, an unsafe link, or a style value outside the app's own palette.
  */
+import { drawingScaleAttr } from './drawing'
 import type { FontKey, Note, RichDoc, RichMark, RichNode } from './types'
 
 export const INK_COLORS = ['muted', 'red', 'orange', 'amber', 'green', 'teal', 'blue', 'violet', 'pink'] as const
@@ -145,7 +146,10 @@ const NODE_SPECS: Record<string, NodeSpec> = {
         width: intIn(a.width, 10, 100, 100),
         caption: typeof a.caption === 'string' ? a.caption.slice(0, MAX_CAPTION) : '',
         naturalWidth: dim(a.naturalWidth),
-        naturalHeight: dim(a.naturalHeight)
+        naturalHeight: dim(a.naturalHeight),
+        // Made in the drawing space, which can reopen it: the pixel density it was saved at
+        // (or `true`). Ordinary images carry no such key at all.
+        ...(drawingScaleAttr(a.drawing) !== null ? { drawing: drawingScaleAttr(a.drawing) } : {})
       }
     }
   }

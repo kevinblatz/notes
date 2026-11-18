@@ -7,11 +7,13 @@ import { Highlight } from '@tiptap/extension-highlight'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Color, FontFamily, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import { Placeholder } from '@tiptap/extensions'
+import { closeHistory } from '@tiptap/pm/history'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { IMAGE_NODE, isValidId, safeLinkHref } from '@shared/content'
+import { drawingScaleAttr } from '@shared/drawing'
 import { importImageFile } from '../../lib/images'
 import type { CaretHint } from '../../state/store'
 import { ImageNodeView } from './ImageNodeView'
@@ -50,7 +52,23 @@ export const NoteImage = Node.create({
         renderHTML: (attrs) => (attrs.caption ? { 'data-caption': attrs.caption as string } : {})
       },
       naturalWidth: numberAttr('data-natural-width', null),
-      naturalHeight: numberAttr('data-natural-height', null)
+      naturalHeight: numberAttr('data-natural-height', null),
+      /**
+       * Set on a picture made in the drawing space, which can reopen it for editing: the pixel
+       * density it was saved at (pixels per CSS pixel), so it reopens at the size it was drawn.
+       */
+      drawing: {
+        default: null,
+        parseHTML: (element) => {
+          const value = element.getAttribute('data-drawing')
+          if (value === null) return null
+          return drawingScaleAttr(value === '' ? true : Number(value))
+        },
+        renderHTML: (attrs) => {
+          const value = drawingScaleAttr(attrs.drawing)
+          return value === null ? {} : { 'data-drawing': value === true ? '' : String(value) }
+        }
+      }
     }
   },
 
@@ -121,7 +139,7 @@ export function buildExtensions(options: { onSubmit: () => void }) {
  * paragraph after it, so typing or adding another image continues below instead of
  * replacing the image that was just added.
  */
-function insertImageNode(editor: Editor, attrs: Record<string, unknown>, position?: number): void {
+function insertImageNode(editor: Editor, attrs: Record<string, unknown>, position?: number, ownUndoStep = false): void {
   editor
     .chain()
     .focus()
@@ -129,6 +147,8 @@ function insertImageNode(editor: Editor, attrs: Record<string, unknown>, positio
       const type = state.schema.nodes[IMAGE_NODE]
       const paragraph = state.schema.nodes.paragraph
       if (!type || !paragraph) return false
+      // Not merged into the typing just before it: one Ctrl+Z takes away exactly this image.
+      if (ownUndoStep) closeHistory(tr)
       const selection = tr.selection
       // A selected block (for example another image) is kept; the new image goes after it.
       const reference = position ?? (selection instanceof NodeSelection ? selection.to : selection.from)
@@ -149,6 +169,65 @@ function insertImageNode(editor: Editor, attrs: Record<string, unknown>, positio
       return true
     })
     .run()
+}
+
+/** Start a new undo step with whatever is typed next, so it is not merged into the change just made. */
+function endUndoStep(editor: Editor): void {
+  if (!editor.isDestroyed) editor.view.dispatch(closeHistory(editor.state.tr))
+}
+
+/**
+ * Put a finished drawing into the note at the caret, exactly where and how a pasted
+ * screenshot goes, as a single undo step of its own.
+ */
+export function insertDrawingNode(editor: Editor, attrs: Record<string, unknown> & { drawing: number }): void {
+  insertImageNode(editor, { caption: '', ...attrs }, undefined, true)
+  endUndoStep(editor)
+}
+
+/** Position of the image block showing `attachmentId`: `hint` when it still is that block, else the first one found. */
+function findImage(editor: Editor, attachmentId: string, hint: number | undefined): { pos: number; node: PMNode } | null {
+  const { doc, schema } = editor.state
+  const type = schema.nodes[IMAGE_NODE]
+  if (typeof hint === 'number' && hint >= 0 && hint < doc.content.size) {
+    const node = doc.nodeAt(hint)
+    if (node && node.type === type && node.attrs.attachmentId === attachmentId) return { pos: hint, node }
+  }
+  let found: { pos: number; node: PMNode } | null = null
+  doc.descendants((node, pos) => {
+    if (found) return false
+    if (node.type === type && node.attrs.attachmentId === attachmentId) found = { pos, node }
+    return !found
+  })
+  return found
+}
+
+/**
+ * Swap the picture of an edited drawing in place: same spot, same width, same caption, one
+ * undo step. Returns false when that image is no longer in the note.
+ */
+export function replaceDrawingNode(editor: Editor, previousAttachmentId: string, hint: number | undefined, attrs: Record<string, unknown> & { drawing: number }): boolean {
+  if (editor.isDestroyed) return false
+  const target = findImage(editor, previousAttachmentId, hint)
+  if (!target) return false
+  const tr = editor.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, ...attrs })
+  tr.setSelection(NodeSelection.create(tr.doc, target.pos)).scrollIntoView()
+  editor.view.dispatch(closeHistory(tr))
+  endUndoStep(editor)
+  editor.view.focus()
+  return true
+}
+
+/** An edited drawing that was cleared and finished empty leaves the note (Ctrl+Z brings it back). */
+export function removeDrawingNode(editor: Editor, attachmentId: string, hint: number | undefined): boolean {
+  if (editor.isDestroyed) return false
+  const target = findImage(editor, attachmentId, hint)
+  if (!target) return false
+  const tr = editor.state.tr.delete(target.pos, target.pos + target.node.nodeSize).scrollIntoView()
+  editor.view.dispatch(closeHistory(tr))
+  endUndoStep(editor)
+  editor.view.focus()
+  return true
 }
 
 /** Import image files and insert them as image blocks, one after another, at `position` (or the selection). */

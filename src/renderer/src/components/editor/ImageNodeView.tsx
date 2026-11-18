@@ -1,15 +1,18 @@
 /** An image inside the editor: resizable from its corner (aspect ratio kept), with an optional caption. */
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
-import { Maximize2 } from 'lucide-react'
+import { Maximize2, Pencil } from 'lucide-react'
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { drawingScaleAttr } from '@shared/drawing'
 import { attachmentUrl } from '@shared/types'
 import { openImagePreview } from '../../state/actions'
+import { openDrawing } from './drawingSession'
 
 const MIN_WIDTH = 10
 
-export function ImageNodeView({ node, updateAttributes, selected, editor }: NodeViewProps) {
+export function ImageNodeView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const attachmentId = String(node.attrs.attachmentId ?? '')
   const caption = String(node.attrs.caption ?? '')
+  const drawing = drawingScaleAttr(node.attrs.drawing)
   const storedWidth = Number(node.attrs.width ?? 100)
   const [dragWidth, setDragWidth] = useState<number | null>(null)
   const [missing, setMissing] = useState(false)
@@ -47,7 +50,13 @@ export function ImageNodeView({ node, updateAttributes, selected, editor }: Node
   const resizeByKey = (delta: number): void => updateAttributes({ width: Math.min(100, Math.max(MIN_WIDTH, storedWidth + delta)) })
 
   return (
-    <NodeViewWrapper className={`image-node${selected ? ' is-selected' : ''}${missing ? ' is-missing' : ''}`} style={{ width: `${width}%` }} ref={wrapper} data-drag-handle>
+    <NodeViewWrapper
+      className={`image-node${selected ? ' is-selected' : ''}${missing ? ' is-missing' : ''}`}
+      style={{ width: `${width}%` }}
+      ref={wrapper}
+      data-drag-handle
+      data-drawing={drawing === null ? undefined : ''}
+    >
       <div className="image-frame">
         {missing ? (
           <div className="image-missing">Image file missing</div>
@@ -65,6 +74,21 @@ export function ImageNodeView({ node, updateAttributes, selected, editor }: Node
         <button type="button" className="image-zoom" aria-label="Open larger preview" title="Open larger preview" onClick={() => openImagePreview(attachmentId, caption)} contentEditable={false}>
           <Maximize2 size={15} />
         </button>
+        {drawing !== null && editor.isEditable && !missing ? (
+          // Back into the drawing space with this picture as the starting point; Done replaces it here.
+          <button
+            type="button"
+            className="image-edit"
+            aria-label="Edit drawing"
+            title="Edit drawing"
+            onClick={() =>
+              openDrawing({ kind: 'edit', attachmentId, scale: drawing === true ? null : drawing, getPos: () => (typeof getPos === 'function' ? getPos() : undefined) })
+            }
+            contentEditable={false}
+          >
+            <Pencil size={15} />
+          </button>
+        ) : null}
         {editor.isEditable ? (
           <span
             className="image-resize"
