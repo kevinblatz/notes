@@ -155,10 +155,16 @@ export function FindPalette({ mode }: { mode: 'find' | 'pins' }) {
   useEscape(true, closePanel)
   useFocusTrap(panel, true)
   // The keyboard goes into the palette as soon as it opens: the search field, or the first
-  // pinned entry (or the Pinned tab when nothing is pinned yet).
+  // pinned entry, one Enter away (the Pinned tab when nothing is pinned yet). Switching to
+  // the pinned list by its tab leaves the keyboard on the tab the user just used.
   useEffect(() => {
-    if (mode === 'find') input.current?.focus()
-    else (panel.current?.querySelector<HTMLElement>('.pin-open') ?? panel.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))?.focus()
+    if (mode === 'find') {
+      input.current?.focus()
+      return
+    }
+    const tab = panel.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+    if (tab && document.activeElement === tab) return
+    ;(panel.current?.querySelector<HTMLElement>('.pin-open') ?? tab)?.focus()
   }, [mode])
 
   const all = useMemo(() => Object.values(notes), [notes])
