@@ -265,6 +265,9 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
     const onBlur = ({ event }: { event: FocusEvent }): void => {
       const next = event.relatedTarget
       if (next instanceof Node && bubble.current?.contains(next)) return
+      // The whole window lost the keyboard (the chart was clicked): leave everything as it
+      // was, so coming back finds the open row exactly where it was left.
+      if (!document.hasFocus()) return
       setRow(null)
     }
     editor.on('transaction', onTransaction)

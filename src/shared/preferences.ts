@@ -5,6 +5,8 @@ import { DEFAULT_PREFERENCES, type FontKey, type Preferences, type ReducedMotion
 export const THEMES: readonly ThemeKey[] = ['charcoal', 'midnight', 'paper']
 export const THEME_LABELS: Record<ThemeKey, string> = { charcoal: 'Charcoal', midnight: 'Midnight', paper: 'Paper' }
 const MOTION: readonly ReducedMotion[] = ['system', 'on', 'off']
+/** Below this the notes become hard to read and easy to lose on the screen. */
+export const MIN_WINDOW_OPACITY = 0.3
 
 /**
  * Apply an untrusted partial update on top of known-good preferences. Unknown keys and
@@ -25,6 +27,11 @@ export function mergePreferences(base: Preferences, patch: unknown): Preferences
   }
   if (typeof p.theme === 'string' && (THEMES as readonly string[]).includes(p.theme)) next.theme = p.theme as ThemeKey
   if (typeof p.reducedMotion === 'string' && (MOTION as readonly string[]).includes(p.reducedMotion)) next.reducedMotion = p.reducedMotion as ReducedMotion
+  if (typeof p.windowOpacity === 'number' && Number.isFinite(p.windowOpacity)) {
+    next.windowOpacity = Math.min(1, Math.max(MIN_WINDOW_OPACITY, Math.round(p.windowOpacity * 100) / 100))
+  }
+  if (typeof p.opacitySolidOnHover === 'boolean') next.opacitySolidOnHover = p.opacitySolidOnHover
+  if (typeof p.formatBarCollapsed === 'boolean') next.formatBarCollapsed = p.formatBarCollapsed
   return next
 }
 

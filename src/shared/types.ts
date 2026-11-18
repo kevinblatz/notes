@@ -101,6 +101,12 @@ export interface Preferences {
   fontSize: number
   theme: ThemeKey
   reducedMotion: ReducedMotion
+  /** How opaque the notes window is, from MIN_WINDOW_OPACITY to 1 (solid). */
+  windowOpacity: number
+  /** While see-through: turn solid while the pointer is over the notes or they have the keyboard. */
+  opacitySolidOnHover: boolean
+  /** The formatting bar under an open note is folded away. */
+  formatBarCollapsed: boolean
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -111,7 +117,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   fontFamily: 'sans',
   fontSize: 17,
   theme: 'charcoal',
-  reducedMotion: 'system'
+  reducedMotion: 'system',
+  windowOpacity: 1,
+  opacitySolidOnHover: true,
+  formatBarCollapsed: false
 }
 
 export interface ShortcutStatus {

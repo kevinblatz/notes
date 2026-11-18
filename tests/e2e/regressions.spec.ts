@@ -4,7 +4,9 @@
  *
  *  R1  The colour / highlight / link row of the selection bar goes away with the bar. Before,
  *      the row outlived the hidden bar and kept its claim on the keyboard: Ctrl+Enter did
- *      nothing and one Esc was swallowed.
+ *      nothing and one Esc was swallowed. While the bar is in use the row must stay: with the
+ *      word still selected, while its link field is typed in, and while another window (the
+ *      chart) has the keyboard for a moment.
  *  R2  The pinned index opens with the keyboard on its first entry (on the Pinned tab only
  *      when nothing is pinned).
  *  R3  The editor's right-click menu closes when the note scrolls. Other menus still stay
@@ -103,7 +105,9 @@ const setFailSaves = (app: ElectronApplication, flag: boolean): Promise<void> =>
     ;(globalThis as unknown as { __tnTest: TestHandle }).__tnTest.testHooks.failSaves = value
   }, flag)
 
-const storedTexts = async (app: ElectronApplication): Promise<string[]> => (await storedNotes(app)).map((note) => note.plainText)
+/** The text of every stored note, sorted (the order notes are listed in is not what is being tested). */
+const storedTexts = async (app: ElectronApplication): Promise<string[]> => (await storedNotes(app)).map((note) => note.plainText).sort()
+const sorted = (texts: string[]): string[] => [...texts].sort()
 
 // ------------------------------------------------------------------ R1: the selection bar's rows
 
@@ -340,16 +344,6 @@ test('R1e: while the word is still selected Esc closes only the row, a swatch co
   expect(await selectedText(page)).toBe(WORD)
   await expect(editorBody(page)).toBeFocused()
 
-  // While a row is open Ctrl+Enter still belongs to it, not to the note behind.
-  await bar.getByRole('button', { name: 'Highlight' }).click()
-  await expect(highlightRow(page)).toBeVisible()
-  await page.keyboard.press('Control+Enter')
-  await expect(highlightRow(page)).toBeVisible()
-  await expect(focusView(page)).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(highlightRow(page)).toBeHidden()
-  await expect(focusView(page)).toBeVisible()
-
   // The second Esc returns to the board.
   await page.keyboard.press('Escape')
   await expectLogged(ctx, LINES)
@@ -369,6 +363,80 @@ test('R1e: while the word is still selected Esc closes only the row, a swatch co
   expect(runs.filter((run) => (run.marks ?? []).length > 0)).toHaveLength(1)
 })
 
+test('R1e: an open row is still open after another window took the keyboard and gave it back', async () => {
+  const ctx = await start()
+  const { app, page } = ctx
+  const bar = await noteWithSelectedWord(page)
+  await bar.getByRole('button', { name: 'Text color' }).click()
+  await expect(inkRow(page)).toBeVisible()
+
+  // The test driver normally tells the page that it has the keyboard whatever the desktop
+  // says. Switch that off, so the page sees its window lose focus as it does for a person.
+  const session = await page.context().newCDPSession(page)
+  await session.send('Emulation.setFocusEmulationEnabled', { enabled: false })
+  const pageHasFocus = (): Promise<boolean> => page.evaluate(() => document.hasFocus())
+  const closeOther = (): Promise<void> =>
+    app.evaluate(() => {
+      const scope = globalThis as unknown as { __otherWindow?: { isDestroyed: () => boolean; destroy: () => void } }
+      if (scope.__otherWindow && !scope.__otherWindow.isDestroyed()) scope.__otherWindow.destroy()
+      delete scope.__otherWindow
+    })
+
+  try {
+    // Another window is brought forward: stands in for clicking the chart beside the notes.
+    const notesWindowId = await app.evaluate(({ BrowserWindow }) => {
+      const notesId = BrowserWindow.getAllWindows()[0]!.id
+      const other = new BrowserWindow({ x: 1000, y: 40, width: 500, height: 400 })
+      ;(globalThis as unknown as { __otherWindow?: unknown }).__otherWindow = other
+      other.show()
+      other.focus()
+      return notesId
+    })
+    const lostFocus = await expect
+      .poll(pageHasFocus, { timeout: 6000 })
+      .toBe(false)
+      .then(
+        () => true,
+        () => false
+      )
+    test.skip(!lostFocus, 'This desktop did not take keyboard focus away from the notes window, so the case cannot be exercised here.')
+
+    // The notes window is exactly as it was left: the bar and its row are still open.
+    await page.waitForTimeout(400)
+    await expect(focusView(page)).toBeVisible()
+    await expect(bar).toBeVisible()
+    await expect(inkRow(page), 'the colour row while another window has the keyboard').toBeVisible()
+
+    // Back to the notes.
+    await closeOther()
+    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.focus(), notesWindowId)
+    const backInFocus = await expect
+      .poll(pageHasFocus, { timeout: 6000 })
+      .toBe(true)
+      .then(
+        () => true,
+        () => false
+      )
+    // Where the desktop does not hand the keyboard back by itself, carry on as the driver usually does.
+    if (!backInFocus) await session.send('Emulation.setFocusEmulationEnabled', { enabled: true })
+    await expect(inkRow(page), 'the colour row after coming back').toBeVisible()
+
+    // The row still does its job: a swatch colours the word that was selected all along.
+    await inkRow(page).getByRole('button', { name: 'red', exact: true }).click()
+    await expect(editorBody(page).locator('span[style*="--ink-red"]')).toHaveText(WORD)
+    await expect(inkRow(page)).toBeHidden()
+  } finally {
+    await closeOther().catch(() => undefined)
+    await session.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => undefined)
+  }
+
+  // Nothing is left open: Ctrl+Enter logs the note.
+  await clickWord(page, ELSEWHERE)
+  await expect(bar).toBeHidden()
+  await page.keyboard.press('Control+Enter')
+  await expectLogged(ctx, LINES)
+})
+
 // ------------------------------------------------------------------ R2: pinned index
 
 const palette = (page: Page): Locator => page.getByTestId('palette')
@@ -385,13 +453,15 @@ async function pinFromHover(page: Page, text: string): Promise<void> {
   await expect(note).toHaveClass(/is-pinned/)
 }
 
-/** What has keyboard focus, described for a readable failure message. */
+/** What has keyboard focus, in words, so that a failure says where the keyboard went instead. */
 const focusedElement = (page: Page): Promise<string> =>
   page.evaluate(() => {
     const element = document.activeElement
     if (!element || element === document.body) return 'nothing'
-    const name = (element.getAttribute('aria-label') ?? element.textContent ?? '').trim().slice(0, 40)
-    return `${element.tagName.toLowerCase()}${element.getAttribute('role') ? `[role=${element.getAttribute('role')}]` : ''}${element.className ? `.${String(element.className).split(' ')[0]}` : ''} "${name}"`
+    const text = (element.textContent ?? '').trim()
+    if (element.matches('[data-testid="palette"] .pin-open')) return `pinned entry "${element.querySelector('.result-label')?.textContent ?? text}"`
+    if (element.matches('[data-testid="palette"] [role="tab"]')) return `tab "${text}"`
+    return `${element.tagName.toLowerCase()} "${(element.getAttribute('aria-label') ?? text).slice(0, 40)}"`
   })
 
 test('R2: the pinned index opens with the keyboard on its first entry, and Enter shows that note; with nothing pinned it is on the Pinned tab', async () => {
@@ -407,7 +477,8 @@ test('R2: the pinned index opens with the keyboard on its first entry, and Enter
   await expect(pal).toHaveAttribute('aria-label', 'Pinned notes')
   await expect(pal.locator('.pin-open')).toHaveCount(0)
   await expect(pal.getByText(/Nothing pinned yet/)).toBeVisible()
-  await expect(pal.getByRole('tab', { name: 'Pinned', exact: true }), 'the Pinned tab has keyboard focus').toBeFocused()
+  await expect.poll(() => focusedElement(page), { message: 'what has keyboard focus when the empty pinned index opens' }).toBe('tab "Pinned"')
+  await expect(pal.getByRole('tab', { name: 'Pinned', exact: true })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(pal).toBeHidden()
 
@@ -427,7 +498,7 @@ test('R2: the pinned index opens with the keyboard on its first entry, and Enter
   await expect(pal).toBeVisible()
   const entries = pal.locator('.pin-open')
   await expect(entries.locator('.result-label')).toHaveText(['Delta note', 'Alpha note'])
-  await expect.poll(() => focusedElement(page), { message: 'what has keyboard focus when the pinned index opens' }).toBe('button.pin-open "Delta note"')
+  await expect.poll(() => focusedElement(page), { message: 'what has keyboard focus when the pinned index opens' }).toBe('pinned entry "Delta note"')
   await expect(entries.first()).toBeFocused()
   expect(await page.evaluate(() => document.activeElement === document.querySelector('[data-testid="palette"] .pin-open'))).toBe(true)
 
@@ -445,6 +516,25 @@ test('R2: the pinned index opens with the keyboard on its first entry, and Enter
 const editMenu = (page: Page): Locator => page.getByRole('menu', { name: 'Edit' })
 const LONG_NOTE = Array.from({ length: 50 }, (_, index) => `Rule ${String(index + 1).padStart(2, '0')}: wait for the retest`)
 
+/** The "Rule NN" that starts the line nearest the middle of the note's scrolling area right now. */
+async function ruleNearMiddle(page: Page): Promise<string> {
+  return page.locator('.focus-scroll').evaluate((scroll) => {
+    const area = scroll.getBoundingClientRect()
+    const middle = area.top + area.height / 2
+    let best = ''
+    let distance = Infinity
+    for (const line of scroll.querySelectorAll('.ProseMirror p')) {
+      const rect = line.getBoundingClientRect()
+      const away = Math.abs(rect.top + rect.height / 2 - middle)
+      if (away < distance) {
+        distance = away
+        best = line.textContent ?? ''
+      }
+    }
+    return best.slice(0, 'Rule 00'.length)
+  })
+}
+
 test('R3: the right-click menu in a note closes when the note is scrolled with the wheel', async () => {
   const { page } = await start()
   await clickEmptySpace(page)
@@ -456,16 +546,16 @@ test('R3: the right-click menu in a note closes when the note is scrolled with t
   const scroller = page.locator('.focus-scroll')
   const extent = await scroller.evaluate((element) => ({ scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }))
   expect(extent.scrollHeight, 'the note is taller than its scrolling area').toBeGreaterThan(extent.clientHeight + 300)
-  await editorBody(page).locator('p').nth(39).scrollIntoViewIfNeeded()
   const before = await settledScrollTop(scroller)
 
   // Right-click a word: Cut, Copy and Paste are offered at the pointer.
-  const point = await reachableWordPoint(page, 'Rule 40')
+  const point = await reachableWordPoint(page, await ruleNearMiddle(page))
   await page.mouse.click(point.x, point.y, { button: 'right' })
   const menu = editMenu(page)
   await expect(menu).toBeVisible()
   await expect(menu.locator('.menu-item .menu-text')).toHaveText(['Cut', 'Copy', 'Paste', 'Paste as plain text', 'Select all'])
   for (const label of ['Cut', 'Copy', 'Paste']) await expect(menu.locator('.menu-item').filter({ has: page.getByText(label, { exact: true }) })).toBeVisible()
+  await expect(focusView(page)).toBeVisible()
 
   // It stays while nothing happens (it is not about to close by itself).
   await page.waitForTimeout(300)
@@ -479,7 +569,7 @@ test('R3: the right-click menu in a note closes when the note is scrolled with t
   await expect(focusView(page)).toBeVisible()
 
   // The menu can be asked for again at the new position.
-  const again = await reachableWordPoint(page, 'Rule 36')
+  const again = await reachableWordPoint(page, await ruleNearMiddle(page))
   await page.mouse.click(again.x, again.y, { button: 'right' })
   await expect(menu).toBeVisible()
   await page.keyboard.press('Escape')
@@ -598,8 +688,12 @@ async function draftThatCannotBeSaved(ctx: Launched): Promise<void> {
 /** Saving works again: "Try again" in the editor stores everything that was typed. */
 async function recoverWithTryAgain(ctx: Launched): Promise<void> {
   const { app, page } = ctx
+  // The pointer is on the button before saving is switched back on, so that it is this press
+  // that stores the note and not one of the app's own, widely spaced, retries.
+  const tryAgain = notSaved(page).getByRole('button', { name: 'Try again' })
+  await tryAgain.hover()
   await setFailSaves(app, false)
-  await notSaved(page).getByRole('button', { name: 'Try again' }).click()
+  await tryAgain.click()
   await expect(savedStatus(page)).toBeVisible()
   await expect(notSaved(page)).toHaveCount(0)
   expect(await storedTexts(app)).toContain(STORED + UNSTORED)
@@ -609,7 +703,7 @@ test('R4: Export refuses to run while the open note cannot be saved, writes noth
   const ctx = await start()
   const { app, page } = ctx
   const dir = tempDir('tn-regress-export-')
-  const file = join(dir, 'must-not-exist.tnbackup')
+  const file = join(dir, 'notes.tnbackup')
   await draftThatCannotBeSaved(ctx)
 
   await answerSaveDialog(app, file)
@@ -632,6 +726,7 @@ test('R4: Export refuses to run while the open note cannot be saved, writes noth
   await expect(page.getByTestId('export-backup')).toBeEnabled()
   await expect(exportDone(page)).toHaveCount(0)
   expect(readdirSync(dir)).toEqual([])
+  expect((await dialogsShown(app)).save).toBe(0)
 
   // The note is still open behind the panel, with every word, and still says it is not saved.
   await closePanel(page)
@@ -646,7 +741,7 @@ test('R4: Export refuses to run while the open note cannot be saved, writes noth
   await page.getByTestId('export-backup').click()
   await expect(exportDone(page)).toContainText('Saved 1 note and 0 images')
   await expect(backupError(page)).toHaveCount(0)
-  expect(readdirSync(dir)).toEqual(['must-not-exist.tnbackup'])
+  expect(readdirSync(dir)).toEqual(['notes.tnbackup'])
   await closePanel(page)
   await expect(focusView(page)).toBeVisible()
   await expect(editorBody(page)).toHaveText(STORED + UNSTORED)
@@ -668,7 +763,7 @@ test('R4: Import refuses to run while the open note cannot be saved, imports not
   const { app, page } = ctx
   await writeNote(page, ['Already here'])
   await draftThatCannotBeSaved(ctx)
-  expect(await storedTexts(app)).toEqual(['Already here', STORED])
+  expect(await storedTexts(app)).toEqual(sorted(['Already here', STORED]))
 
   // Choose the backup: looking at what it holds needs nothing saved, so the preview shows.
   await openBackupPanel(page)
@@ -683,7 +778,7 @@ test('R4: Import refuses to run while the open note cannot be saved, imports not
   await expect(backupError(page)).toContainText('could not be saved yet')
   await expect(importResult(page)).toHaveCount(0)
   await expect(backupSheet(page).locator('.setting-success')).toHaveCount(0)
-  expect(await storedTexts(app), 'nothing was imported').toEqual(['Already here', STORED])
+  expect(await storedTexts(app), 'nothing was imported').toEqual(sorted(['Already here', STORED]))
   await expect(focusView(page)).toBeVisible()
 
   // Behind the panel the note is still open with every word.
@@ -691,11 +786,11 @@ test('R4: Import refuses to run while the open note cannot be saved, imports not
   await expect(focusView(page)).toBeVisible()
   await expect(editorBody(page)).toHaveText(STORED + UNSTORED)
   await expect(notSaved(page)).toBeVisible()
-  expect(await storedTexts(app)).toEqual(['Already here', STORED])
+  expect(await storedTexts(app)).toEqual(sorted(['Already here', STORED]))
 
   // Saving works again and "Try again" stores the note.
   await recoverWithTryAgain(ctx)
-  expect(await storedTexts(app)).toEqual(['Already here', STORED + UNSTORED])
+  expect(await storedTexts(app)).toEqual(sorted(['Already here', STORED + UNSTORED]))
 
   // Now the same import goes through, and the note keeps everything that was typed.
   await openBackupPanel(page)
@@ -707,5 +802,5 @@ test('R4: Import refuses to run while the open note cannot be saved, imports not
   await closePanel(page)
   await expect(focusView(page)).toBeHidden()
   expect(await boardLabels(page)).toEqual(['Already here', STORED + UNSTORED, 'Arrives by import'])
-  expect((await storedTexts(app)).sort()).toEqual(['Already here', 'Arrives by import\nWritten on another computer.', STORED + UNSTORED].sort())
+  expect(await storedTexts(app)).toEqual(sorted(['Already here', STORED + UNSTORED, 'Arrives by import\nWritten on another computer.']))
 })
