@@ -468,11 +468,16 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [])
 
+  // The ink colours follow the theme.
+  useEffect(() => {
+    redrawInk()
+  }, [theme, redrawInk])
+
   // Tab stays inside the sheet (or inside the question while it shows).
   const trapTab = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (event.key !== 'Tab') return
     const scope = confirmRef.current ?? layerRef.current
-    const items = Array.from(scope?.querySelectorAll<HTMLElement>('button:not([disabled])') ?? [])
+    const items = Array.from(scope?.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"])') ?? [])
     if (items.length === 0) return
     const index = items.indexOf(document.activeElement as HTMLElement)
     event.preventDefault()
@@ -487,6 +492,19 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
     // The theme changes the colours behind the variables.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool, color, sizeIndex, theme])
+
+  /** Colours and sizes are each one stop for Tab; the arrow keys choose within them. */
+  const arrowKeys = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+    if (!step) return
+    const radios = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'))
+    const index = radios.indexOf(document.activeElement as HTMLButtonElement)
+    const next = radios[(Math.max(0, index) + step + radios.length) % radios.length]
+    if (!next) return
+    event.preventDefault()
+    next.focus()
+    next.click()
+  }
 
   const pickColor = (next: DrawColor): void => {
     setColor(next)
@@ -518,13 +536,14 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
       ) : null}
 
       <div ref={toolbarRef} className="draw-toolbar" role="toolbar" aria-label="Drawing tools">
-        <div className={`draw-swatches${tool === 'eraser' ? ' is-idle' : ''}`} role="radiogroup" aria-label="Ink color">
+        <div className={`draw-swatches${tool === 'eraser' ? ' is-idle' : ''}`} role="radiogroup" aria-label="Ink color" onKeyDown={arrowKeys}>
           {DRAW_COLORS.map((name) => (
             <button
               key={name}
               type="button"
               role="radio"
               aria-checked={color === name}
+              tabIndex={color === name ? 0 : -1}
               aria-label={colorLabel(name)}
               title={colorLabel(name)}
               className="draw-swatch"
@@ -534,9 +553,9 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
           ))}
         </div>
         <span className="draw-divider" />
-        <div className="draw-sizes" role="radiogroup" aria-label="Brush size">
+        <div className="draw-sizes" role="radiogroup" aria-label="Brush size" onKeyDown={arrowKeys}>
           {SIZE_LABELS.map((label, index) => (
-            <button key={label} type="button" role="radio" aria-checked={sizeIndex === index} aria-label={label} title={`${label} (${index + 1})`} className="draw-size" onClick={() => setSizeIndex(index)}>
+            <button key={label} type="button" role="radio" aria-checked={sizeIndex === index} tabIndex={sizeIndex === index ? 0 : -1} aria-label={label} title={`${label} (${index + 1})`} className="draw-size" onClick={() => setSizeIndex(index)}>
               <span style={{ width: 3 + index * 3.5, height: 3 + index * 3.5 }} />
             </button>
           ))}
@@ -555,12 +574,20 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
           <Trash2 size={16} />
         </IconButton>
         <span className="draw-divider" />
-        <button type="button" className="ghost-button draw-cancel" title="Cancel (Esc)" onClick={requestCancel} disabled={busy}>
+        <button type="button" className="ghost-button draw-cancel" title="Cancel (Esc)" aria-keyshortcuts="Escape" onClick={requestCancel} disabled={busy}>
           Cancel
         </button>
-        <button type="button" className="primary-button draw-done" title="Put the drawing in the note (Ctrl+Enter)" onClick={() => void done()} disabled={busy || loading}>
+        <button
+          type="button"
+          className="primary-button draw-done"
+          title="Put the drawing in the note (Ctrl+Enter)"
+          aria-label={busy ? 'Adding the drawing' : 'Done'}
+          aria-keyshortcuts="Control+Enter"
+          onClick={() => void done()}
+          disabled={busy || loading}
+        >
           {busy ? 'Adding…' : 'Done'}
-          <kbd>Ctrl ↵</kbd>
+          <kbd aria-hidden="true">Ctrl ↵</kbd>
         </button>
       </div>
 

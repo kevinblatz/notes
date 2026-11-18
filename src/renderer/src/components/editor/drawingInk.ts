@@ -78,15 +78,15 @@ export function sheetColor(): string {
 
 /** Brush feel: a little smoothing and a short taper at both ends; speed thins a mouse line slightly. */
 function strokeOptions(stroke: Stroke): StrokeOptions {
-  const taper = Math.max(6, stroke.size * 2.4)
   return {
     size: stroke.size,
     thinning: stroke.pressure ? 0.62 : 0.42,
     smoothing: 0.6,
-    streamline: 0.3,
+    // Little streamlining: the line stays where the pointer went, corners included.
+    streamline: 0.2,
     simulatePressure: !stroke.pressure,
-    start: { taper, cap: true },
-    end: { taper, cap: true },
+    start: { taper: Math.max(4, stroke.size * 1.4), cap: true },
+    end: { taper: Math.max(6, stroke.size * 2), cap: true },
     // The outline always ends exactly at the pointer, so the line never trails behind it.
     last: true
   }

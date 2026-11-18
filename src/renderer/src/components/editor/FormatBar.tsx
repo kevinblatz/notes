@@ -259,7 +259,7 @@ export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: 
               <Dropdown label="Paragraph style" text={headingLabel} entries={styleEntries} width={92} />
               <Dropdown label="Font" text={fontLabel ? FONT_LABELS[fontLabel] : 'Font'} entries={fontEntries} width={76} />
               <Dropdown label="Text size" text={state.fontSize ? state.fontSize.replace('px', '') : 'Size'} entries={sizeEntries} width={56} />
-              <IconButton label="Draw" hint={DRAW_SHORTCUT} onMouseDown={keepSelection} onClick={() => openDrawing({ kind: 'new' })}>
+              <IconButton label="Draw" hint={DRAW_SHORTCUT} aria-keyshortcuts="Control+Shift+D" onMouseDown={keepSelection} onClick={() => openDrawing({ kind: 'new' })}>
                 <Brush size={16} />
               </IconButton>
             </div>

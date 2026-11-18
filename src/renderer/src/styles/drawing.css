@@ -15,6 +15,11 @@
 .format-dock-inner {
   min-height: 0;
   overflow: hidden;
+  transition: visibility 0s;
+}
+.format-dock.is-collapsed .format-dock-inner {
+  visibility: hidden;
+  transition: visibility 0s 200ms;
 }
 .format-dock .format-bar {
   transition:
@@ -258,6 +263,15 @@
 }
 @media (max-width: 760px) {
   .draw-done kbd {
+    display: none;
+  }
+}
+/* Too narrow for one row: the groups wrap and are told apart by space instead of rules. */
+@media (max-width: 600px) {
+  .draw-toolbar {
+    gap: 4px 10px;
+  }
+  .draw-divider {
     display: none;
   }
 }
