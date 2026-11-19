@@ -3,12 +3,15 @@
  * editor, plus a small bubble that appears beside selected text.
  */
 import type { Editor } from '@tiptap/core'
+import { PluginKey } from '@tiptap/pm/state'
 import { useEditorState } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
 import {
   Baseline,
   Bold,
+  Brush,
   ChevronDown,
+  ChevronUp,
   ExternalLink,
   Highlighter,
   ImagePlus,
@@ -23,11 +26,22 @@ import {
   Undo2,
   Unlink
 } from 'lucide-react'
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { FONT_KEYS, FONT_LABELS, FONT_SIZES, fontVar, HIGHLIGHT_COLORS, highlightVar, INK_COLORS, inkVar, safeLinkHref } from '@shared/content'
 import { api } from '../../lib/api'
-import { useEscape } from '../../lib/escape'
+import { overlayDepth, useEscape } from '../../lib/escape'
+import { updatePreferences } from '../../state/actions'
+import { useStore } from '../../state/store'
 import { IconButton, MenuList, Popover, type MenuEntry } from '../ui'
+import { DrawingSpace } from './DrawingSpace'
+import { closeDrawing, openDrawing, useDrawingSession } from './drawingSession'
+
+/** Opens the drawing space for the caret, from anywhere in an open note, bar shown or hidden. */
+export const DRAW_SHORTCUT = 'Ctrl+Shift+D'
+
+function isDrawShortcut(event: KeyboardEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd'
+}
 
 /** Keep the text selection when a control is pressed with the mouse. */
 const keepSelection = (event: MouseEvent): void => event.preventDefault()
@@ -191,6 +205,26 @@ export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: 
   const state = useFormatState(editor)
   const [linkOpen, setLinkOpen] = useState(false)
   const linkAnchor = useRef<HTMLButtonElement>(null)
+  const collapsed = useStore((s) => s.prefs.formatBarCollapsed)
+  const drawing = useDrawingSession((s) => s.target)
+  const barId = useId()
+
+  // Ctrl+Shift+D works wherever the keyboard is in the note (text, title, a caption), and
+  // also while the bar is folded away. Like Ctrl+Enter, it leaves an open menu alone.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.isComposing || !isDrawShortcut(event)) return
+      event.preventDefault()
+      if (overlayDepth() > 1) return
+      openDrawing({ kind: 'new' })
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      // The drawing space belongs to this note; it never outlives it.
+      closeDrawing()
+    }
+  }, [])
   const run = (fn: (chain: ReturnType<Editor['chain']>) => ReturnType<Editor['chain']>) => (): void => {
     fn(editor.chain().focus()).run()
     // Return the keyboard to the text right away (the command above does it a frame later),
@@ -216,37 +250,60 @@ export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: 
   const headingLabel = state.heading === 0 ? 'Text' : `Heading ${state.heading}`
 
   return (
-    <div className="format-bar" role="toolbar" aria-label="Formatting">
-      <div className="bar-group">
-        <Dropdown label="Paragraph style" text={headingLabel} entries={styleEntries} width={92} />
-        <Dropdown label="Font" text={fontLabel ? FONT_LABELS[fontLabel] : 'Font'} entries={fontEntries} width={76} />
-        <Dropdown label="Text size" text={state.fontSize ? state.fontSize.replace('px', '') : 'Size'} entries={sizeEntries} width={56} />
+    <>
+      <div className={`format-dock${collapsed ? ' is-collapsed' : ''}`} data-testid="format-dock">
+        {/* Folded away: out of sight, out of the Tab order, and the note gets the room. */}
+        <div className="format-dock-inner" inert={collapsed}>
+          <div id={barId} className="format-bar" role="toolbar" aria-label="Formatting">
+            <div className="bar-group">
+              <Dropdown label="Paragraph style" text={headingLabel} entries={styleEntries} width={92} />
+              <Dropdown label="Font" text={fontLabel ? FONT_LABELS[fontLabel] : 'Font'} entries={fontEntries} width={76} />
+              <Dropdown label="Text size" text={state.fontSize ? state.fontSize.replace('px', '') : 'Size'} entries={sizeEntries} width={56} />
+              <IconButton label="Draw" hint={DRAW_SHORTCUT} aria-keyshortcuts="Control+Shift+D" onMouseDown={keepSelection} onClick={() => openDrawing({ kind: 'new' })}>
+                <Brush size={16} />
+              </IconButton>
+            </div>
+            <div className="bar-group">
+              <IconButton label="Bold" hint="Ctrl+B" active={state.bold} onMouseDown={keepSelection} onClick={run((c) => c.toggleBold())}><Bold size={16} /></IconButton>
+              <IconButton label="Italic" hint="Ctrl+I" active={state.italic} onMouseDown={keepSelection} onClick={run((c) => c.toggleItalic())}><Italic size={16} /></IconButton>
+              <IconButton label="Underline" hint="Ctrl+U" active={state.underline} onMouseDown={keepSelection} onClick={run((c) => c.toggleUnderline())}><Underline size={16} /></IconButton>
+              <IconButton label="Strikethrough" hint="Ctrl+Shift+S" active={state.strike} onMouseDown={keepSelection} onClick={run((c) => c.toggleStrike())}><Strikethrough size={16} /></IconButton>
+              <ColorControl editor={editor} kind="ink" current={state.color} />
+              <ColorControl editor={editor} kind="highlight" current={state.highlight} />
+            </div>
+            <div className="bar-group">
+              <IconButton label="Bulleted list" active={state.bullet} onMouseDown={keepSelection} onClick={run((c) => c.toggleBulletList())}><List size={16} /></IconButton>
+              <IconButton label="Numbered list" active={state.ordered} onMouseDown={keepSelection} onClick={run((c) => c.toggleOrderedList())}><ListOrdered size={16} /></IconButton>
+              <IconButton label="Checklist" active={state.task} onMouseDown={keepSelection} onClick={run((c) => c.toggleTaskList())}><ListChecks size={16} /></IconButton>
+            </div>
+            <div className="bar-group">
+              <IconButton ref={linkAnchor} label="Link" active={state.link !== null} aria-haspopup="dialog" aria-expanded={linkOpen} onMouseDown={keepSelection} onClick={() => setLinkOpen((v) => !v)}><LinkIcon size={16} /></IconButton>
+              <Popover anchor={linkAnchor.current} open={linkOpen} onClose={() => setLinkOpen(false)} placement="top" align="center" label="Link">
+                <LinkForm editor={editor} current={state.link} onDone={() => setLinkOpen(false)} />
+              </Popover>
+              <IconButton label="Add image" onMouseDown={keepSelection} onClick={onAddImage}><ImagePlus size={16} /></IconButton>
+            </div>
+            <div className="bar-group">
+              <IconButton label="Undo" hint="Ctrl+Z" disabled={!state.canUndo} onMouseDown={keepSelection} onClick={run((c) => c.undo())}><Undo2 size={16} /></IconButton>
+              <IconButton label="Redo" hint="Ctrl+Y" disabled={!state.canRedo} onMouseDown={keepSelection} onClick={run((c) => c.redo())}><Redo2 size={16} /></IconButton>
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="format-fold"
+          aria-controls={barId}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Show formatting' : 'Hide formatting'}
+          title={collapsed ? 'Show formatting' : 'Hide formatting'}
+          onMouseDown={keepSelection}
+          onClick={() => void updatePreferences({ formatBarCollapsed: !collapsed })}
+        >
+          {collapsed ? <ChevronUp size={14} strokeWidth={2.25} /> : <ChevronDown size={14} strokeWidth={2.25} />}
+        </button>
       </div>
-      <div className="bar-group">
-        <IconButton label="Bold" hint="Ctrl+B" active={state.bold} onMouseDown={keepSelection} onClick={run((c) => c.toggleBold())}><Bold size={16} /></IconButton>
-        <IconButton label="Italic" hint="Ctrl+I" active={state.italic} onMouseDown={keepSelection} onClick={run((c) => c.toggleItalic())}><Italic size={16} /></IconButton>
-        <IconButton label="Underline" hint="Ctrl+U" active={state.underline} onMouseDown={keepSelection} onClick={run((c) => c.toggleUnderline())}><Underline size={16} /></IconButton>
-        <IconButton label="Strikethrough" hint="Ctrl+Shift+S" active={state.strike} onMouseDown={keepSelection} onClick={run((c) => c.toggleStrike())}><Strikethrough size={16} /></IconButton>
-        <ColorControl editor={editor} kind="ink" current={state.color} />
-        <ColorControl editor={editor} kind="highlight" current={state.highlight} />
-      </div>
-      <div className="bar-group">
-        <IconButton label="Bulleted list" active={state.bullet} onMouseDown={keepSelection} onClick={run((c) => c.toggleBulletList())}><List size={16} /></IconButton>
-        <IconButton label="Numbered list" active={state.ordered} onMouseDown={keepSelection} onClick={run((c) => c.toggleOrderedList())}><ListOrdered size={16} /></IconButton>
-        <IconButton label="Checklist" active={state.task} onMouseDown={keepSelection} onClick={run((c) => c.toggleTaskList())}><ListChecks size={16} /></IconButton>
-      </div>
-      <div className="bar-group">
-        <IconButton ref={linkAnchor} label="Link" active={state.link !== null} aria-haspopup="dialog" aria-expanded={linkOpen} onMouseDown={keepSelection} onClick={() => setLinkOpen((v) => !v)}><LinkIcon size={16} /></IconButton>
-        <Popover anchor={linkAnchor.current} open={linkOpen} onClose={() => setLinkOpen(false)} placement="top" align="center" label="Link">
-          <LinkForm editor={editor} current={state.link} onDone={() => setLinkOpen(false)} />
-        </Popover>
-        <IconButton label="Add image" onMouseDown={keepSelection} onClick={onAddImage}><ImagePlus size={16} /></IconButton>
-      </div>
-      <div className="bar-group">
-        <IconButton label="Undo" hint="Ctrl+Z" disabled={!state.canUndo} onMouseDown={keepSelection} onClick={run((c) => c.undo())}><Undo2 size={16} /></IconButton>
-        <IconButton label="Redo" hint="Ctrl+Y" disabled={!state.canRedo} onMouseDown={keepSelection} onClick={run((c) => c.redo())}><Redo2 size={16} /></IconButton>
-      </div>
-    </div>
+      {drawing ? <DrawingSpace editor={editor} target={drawing} /> : null}
+    </>
   )
 }
 
@@ -255,6 +312,8 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
   const state = useFormatState(editor)
   const [row, setRow] = useState<'ink' | 'highlight' | 'link' | null>(null)
   const bubble = useRef<HTMLDivElement>(null)
+  // Our own key, so the bar can be told to hide (see the blur handler below).
+  const [bubbleKey] = useState(() => new PluginKey('selectionBubble'))
   // The row belongs to the selection bar. When the bar goes away (the selection is gone, or
   // the keyboard left the note) the row goes with it, together with its claim on Esc below.
   useEffect(() => {
@@ -269,6 +328,12 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
       // was, so coming back finds the open row exactly where it was left.
       if (!document.hasFocus()) return
       setRow(null)
+      // The keyboard moved elsewhere in this window (the title, a caption, the drawing
+      // space): the bar goes too. Tiptap's bar skips hiding on the first blur after any press
+      // inside it, which left it floating over the text once one of its buttons was used.
+      queueMicrotask(() => {
+        if (!editor.isDestroyed && !editor.isFocused) editor.view.dispatch(editor.state.tr.setMeta(bubbleKey, 'hide'))
+      })
     }
     editor.on('transaction', onTransaction)
     editor.on('blur', onBlur)
@@ -276,7 +341,7 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
       editor.off('transaction', onTransaction)
       editor.off('blur', onBlur)
     }
-  }, [editor])
+  }, [editor, bubbleKey])
   // Esc closes the open colour or link row first, not the note behind it.
   useEscape(row !== null, () => {
     setRow(null)
@@ -292,6 +357,7 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
   return (
     <BubbleMenu
       editor={editor}
+      pluginKey={bubbleKey}
       options={{ placement: 'top', offset: 8, flip: true, shift: { padding: 8 } }}
       shouldShow={({ editor: e, state: s }) => {
         if (!e.isEditable || s.selection.empty) return false
