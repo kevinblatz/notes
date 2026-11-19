@@ -2,13 +2,14 @@
 import { useLayoutEffect, useState } from 'react'
 import { acceleratorFromEvent, formatAccelerator } from '@shared/accelerator'
 import { FONT_KEYS, FONT_LABELS, FONT_SIZES } from '@shared/content'
-import { THEME_LABELS, THEMES } from '@shared/preferences'
+import { OPACITY_SHORTCUT_LABELS, opacityPercent, THEME_LABELS, THEMES } from '@shared/preferences'
 import type { DockSide, FontKey, ReducedMotion, ThemeKey } from '@shared/types'
 import { api } from '../lib/api'
 import { useEscape } from '../lib/escape'
-import { openPanel, toast, updatePreferences } from '../state/actions'
+import { openPanel, setSolidWhileInUse, toast, updatePreferences } from '../state/actions'
 import { setState, useStore } from '../state/store'
 import { Sheet } from './Sheet'
+import { OpacitySlider, useShownOpacity } from './TitleBar'
 import { Segmented, Switch } from './ui'
 
 function ShortcutRecorder() {
@@ -85,6 +86,35 @@ function ShortcutRecorder() {
   )
 }
 
+/** The same slider and switch as the title bar's opacity control. */
+function OpacitySettings() {
+  const value = useShownOpacity()
+  const solidWhileInUse = useStore((s) => s.prefs.opacitySolidOnHover)
+  return (
+    <>
+      <div className="setting-block opacity-setting">
+        <div className="setting-row">
+          <div>
+            <div className="setting-label">Opacity</div>
+            <div className="setting-help">
+              See what is behind the notes. Quicker: scroll over the drop in the title bar, or press {OPACITY_SHORTCUT_LABELS.down} / {OPACITY_SHORTCUT_LABELS.up}.
+            </div>
+          </div>
+          <span className="opacity-value" aria-hidden="true">{opacityPercent(value)}%</span>
+        </div>
+        <OpacitySlider />
+      </div>
+      <div className="setting-row">
+        <div>
+          <div className="setting-label">Solid while I use it</div>
+          <div className="setting-help">While see-through, the notes turn solid when the pointer is on them or you type in them.</div>
+        </div>
+        <Switch label="Solid while I use it" checked={solidWhileInUse} onChange={setSolidWhileInUse} />
+      </div>
+    </>
+  )
+}
+
 export function SettingsPanel() {
   const prefs = useStore((s) => s.prefs)
   const windowStatus = useStore((s) => s.windowStatus)
@@ -119,6 +149,7 @@ export function SettingsPanel() {
           </div>
           <Switch label="Always on top" checked={prefs.alwaysOnTop} onChange={(next) => void updatePreferences({ alwaysOnTop: next })} />
         </div>
+        <OpacitySettings />
         <div className="setting-row">
           <div>
             <div className="setting-label">Start with Windows</div>

@@ -51,6 +51,13 @@ export interface TnApi {
   flushDone(token: string, saved: boolean): void
   /** Tell the main process whether the open note holds writing that is not stored yet. */
   reportUnsaved(unsaved: boolean): void
+  /** Tell the main process the pointer came onto the page or left it ("solid while I use it"). */
+  reportPointer(inside: boolean): void
+  /**
+   * Show this window opacity right away, without storing it, because the user is adjusting it
+   * (it wins over "solid while I use it" so they can see what they pick). Null ends the preview.
+   */
+  previewOpacity(value: number | null): void
   on<K extends keyof MainEvents>(name: K, listener: (payload: MainEvents[K]) => void): () => void
 }
 

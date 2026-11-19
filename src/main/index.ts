@@ -150,6 +150,7 @@ async function main(): Promise<void> {
     if (previous.alwaysOnTop !== next.alwaysOnTop) manager.setAlwaysOnTop(next.alwaysOnTop)
     if (previous.launchAtStartup !== next.launchAtStartup) applyAutostart(next.launchAtStartup)
     if (previous.dockSide !== next.dockSide) manager.dockTo(next.dockSide)
+    if (previous.windowOpacity !== next.windowOpacity || previous.opacitySolidOnHover !== next.opacitySolidOnHover) manager.updateOpacity()
     manager.send('preferences-changed', next)
     tray?.refresh()
   }
@@ -206,6 +207,11 @@ async function main(): Promise<void> {
     setAlwaysOnTop: (flag) => {
       const previous = lib.getPreferences()
       applyPreferences(previous, lib.setPreferences({ alwaysOnTop: flag }))
+    },
+    opacity: () => lib.getPreferences().windowOpacity,
+    setOpacity: (value) => {
+      const previous = lib.getPreferences()
+      applyPreferences(previous, lib.setPreferences({ windowOpacity: value }))
     },
     quit: () => void quit()
   })

@@ -1,5 +1,6 @@
 /** Notification-area icon: left click shows or hides the notes, right click opens a small menu. */
-import { Menu, nativeImage, Tray, type MenuItem } from 'electron'
+import { Menu, nativeImage, Tray, type MenuItem, type MenuItemConstructorOptions } from 'electron'
+import { formatOpacity, opacityMenuChoices } from '@shared/preferences'
 import type { DockSide } from '@shared/types'
 
 export interface TrayActions {
@@ -8,7 +9,23 @@ export interface TrayActions {
   dock: (side: DockSide) => void
   isAlwaysOnTop: () => boolean
   setAlwaysOnTop: (flag: boolean) => void
+  /** The chosen window opacity (the stored preference). */
+  opacity: () => number
+  setOpacity: (value: number) => void
   quit: () => void
+}
+
+/** A menu entry as the automated desktop tests read it. */
+export interface TestMenuEntry {
+  label: string
+  checked: boolean
+  submenu?: TestMenuEntry[]
+}
+
+function describe(items: MenuItem[]): TestMenuEntry[] {
+  return items
+    .filter((item) => item.type !== 'separator')
+    .map((item) => (item.submenu ? { label: item.label, checked: item.checked, submenu: describe(item.submenu.items) } : { label: item.label, checked: item.checked }))
 }
 
 export class TrayController {
@@ -34,6 +51,14 @@ export class TrayController {
   /** Rebuild the menu so its labels and check marks match the window. */
   refresh(): void {
     if (!this.tray) return
+    const opacity = this.actions.opacity()
+    // The presets, and the current value too when it was set to something in between.
+    const opacityItems: MenuItemConstructorOptions[] = opacityMenuChoices(opacity).map((value) => ({
+      label: formatOpacity(value),
+      type: 'radio',
+      checked: value === opacity,
+      click: () => this.actions.setOpacity(value)
+    }))
     const menu = Menu.buildFromTemplate([
       { label: this.actions.isShown() ? 'Hide notes' : 'Show notes', click: () => this.actions.toggle() },
       { type: 'separator' },
@@ -45,6 +70,7 @@ export class TrayController {
         checked: this.actions.isAlwaysOnTop(),
         click: (item) => this.actions.setAlwaysOnTop(item.checked)
       },
+      { label: 'Opacity', submenu: opacityItems },
       { type: 'separator' },
       { label: 'Quit Trading Notes', click: () => this.actions.quit() }
     ])
@@ -62,15 +88,27 @@ export class TrayController {
     this.tray?.emit('click')
   }
 
-  /** For the automated desktop tests: the menu as it currently reads. */
-  testMenu(): { label: string; checked: boolean }[] {
-    return (this.menu?.items ?? []).filter((item) => item.type !== 'separator').map((item) => ({ label: item.label, checked: item.checked }))
+  /** For the automated desktop tests: the menu as it currently reads, submenus included. */
+  testMenu(): TestMenuEntry[] {
+    return describe(this.menu?.items ?? [])
   }
 
-  /** For the automated desktop tests: choose a menu entry by its label, as a click on it would. */
-  testChoose(label: string): boolean {
-    const item: MenuItem | undefined = this.menu?.items.find((entry) => entry.label === label)
-    if (!item) return false
+  /**
+   * For the automated desktop tests: choose a menu entry by its label, as a click on it would.
+   * An entry in a submenu is named by the path to it: testChoose('Opacity', '70%').
+   */
+  testChoose(...path: string[]): boolean {
+    let items: MenuItem[] = this.menu?.items ?? []
+    let item: MenuItem | undefined
+    for (const [index, label] of path.entries()) {
+      item = items.find((entry) => entry.label === label)
+      if (!item) return false
+      if (index < path.length - 1) {
+        if (!item.submenu) return false
+        items = item.submenu.items
+      }
+    }
+    if (!item || item.submenu) return false
     item.click()
     return true
   }

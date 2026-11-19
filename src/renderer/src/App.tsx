@@ -6,6 +6,7 @@
 import { X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { fontVar } from '@shared/content'
+import { opacityShortcutSteps } from '@shared/preferences'
 import { api } from './lib/api'
 import { overlayDepth } from './lib/escape'
 import { BackupPanel } from './components/BackupPanel'
@@ -17,7 +18,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { TitleBar } from './components/TitleBar'
 import { Toasts } from './components/Toasts'
 import { TrashPanel } from './components/TrashPanel'
-import { flushAll, initialize, openPanel, startDraft, undoLast } from './state/actions'
+import { flushAll, followStoredOpacity, initialize, openPanel, startDraft, stepWindowOpacity, trackPointerForOpacity, undoLast } from './state/actions'
 import { setState, useStore } from './state/store'
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -45,7 +46,11 @@ export function App() {
       api.on('flush-request', ({ token }) => void flushAll().then((saved) => api.flushDone(token, saved))),
       api.on('shortcut-status', (status) => setState({ shortcut: status })),
       api.on('window-status', (status) => setState({ windowStatus: status })),
-      api.on('preferences-changed', (next) => setState({ prefs: next }))
+      api.on('preferences-changed', (next) => setState({ prefs: next })),
+      // "Solid while I use it" needs to know when the pointer is over the notes.
+      trackPointerForOpacity(),
+      // An opacity chosen in the tray while the opacity control is open reaches the window too.
+      followStoredOpacity()
     ]
     return () => unsubscribe.forEach((off) => off())
   }, [])
@@ -80,6 +85,13 @@ export function App() {
     const onKeyDown = (event: KeyboardEvent): void => {
       const mod = event.ctrlKey || event.metaKey
       if (!mod || event.altKey) return
+      // Ctrl+Shift+Minus / Ctrl+Shift+Plus: window opacity, from anywhere in the window.
+      const opacitySteps = opacityShortcutSteps(event)
+      if (opacitySteps !== 0) {
+        event.preventDefault()
+        stepWindowOpacity(opacitySteps, 'shortcut')
+        return
+      }
       const key = event.key.toLowerCase()
       if (key === 'k' && !event.shiftKey) {
         event.preventDefault()

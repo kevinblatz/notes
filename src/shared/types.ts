@@ -103,7 +103,10 @@ export interface Preferences {
   reducedMotion: ReducedMotion
   /** How opaque the notes window is, from MIN_WINDOW_OPACITY to 1 (solid). */
   windowOpacity: number
-  /** While see-through: turn solid while the pointer is over the notes or they have the keyboard. */
+  /**
+   * While see-through: turn solid while the pointer is over the notes or they have the keyboard.
+   * Off by default, so notes taken over something stay see-through while you write them.
+   */
   opacitySolidOnHover: boolean
   /** The formatting bar under an open note is folded away. */
   formatBarCollapsed: boolean
@@ -119,7 +122,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   theme: 'charcoal',
   reducedMotion: 'system',
   windowOpacity: 1,
-  opacitySolidOnHover: true,
+  opacitySolidOnHover: false,
   formatBarCollapsed: false
 }
 
