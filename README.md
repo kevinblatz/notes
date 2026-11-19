@@ -52,10 +52,10 @@ ask for them with the shortcut.
 | Do this | To |
 | --- | --- |
 | **Ctrl + Shift + Space** (from any app) | Show or hide the notes. Change it in Settings. |
-| Click the tray icon | Show or hide the notes. Right-click for dock side, always-on-top and Quit. |
+| Click the tray icon | Show or hide the notes. Right-click for dock side, always-on-top, opacity and Quit. |
 | Close button, or Alt + F4 | Hide to the tray. Your notes are saved first. |
 | Gear, then **Quit Trading Notes** | Actually exit. |
-| **Ctrl + ,** | Open Settings: shortcut, dock side, always on top, start with Windows, theme, font and size. |
+| **Ctrl + ,** | Open Settings: shortcut, dock side, always on top, opacity, start with Windows, theme, font and size. |
 
 **Writing**
 
@@ -70,7 +70,7 @@ ask for them with the shortcut.
 | **Ctrl + Shift + V** | Paste as plain text. |
 | Drag an image file in | Onto empty board space: a new image note there. Into an open note: at that spot. |
 | Select text | A small bar appears for bold, italic, underline, strikethrough, colour, highlight and links. |
-| Bar under the note | Paragraph style, font, size, lists, checklists, link, add image, undo and redo. |
+| Bar under the note | Paragraph style, font, size, Draw, lists, checklists, link, add image, undo and redo. The small arrow on its edge folds it away. |
 | Click an image, drag its corner | Resize it (the proportions are kept). Type under it to add a caption. |
 | **Ctrl + click** a link while editing | Open it in your browser. On the board a plain click opens it. |
 | *Add tag*, under the note | Label the note (Rules, Setups and Journal are suggested; any word works). Find can filter by tag. |
@@ -103,6 +103,73 @@ when the window is wide enough again.
 | Gear then *Pinned notes* | Jump to a pinned note, or drag to reorder the list. |
 
 Search looks at the words you typed. It does not read text inside screenshots.
+
+**Drawing**
+
+| Do this | To |
+| --- | --- |
+| **Draw** (the brush beside Font and Size in the bar under the note), or **Ctrl + Shift + D** | Open a blank drawing sheet that covers the whole window below the title bar. The shortcut works from the text, the title or a caption, and also while the formatting bar is hidden. |
+| Draw with the mouse, a pen or a finger | Get smooth ink with slightly tapered ends that follows the pointer. A tap leaves a dot. A pen's pressure changes how thick the line is, and the pen's eraser end erases. The pointer shows as a dot the size and colour of the brush (a ring when erasing). |
+| Colour dots | Pick the ink colour: the note's text colour, then muted, red, orange, amber, green, teal, blue, violet and pink. When the dots have the keyboard, the arrow keys move between them. |
+| *Fine*, *Medium*, *Bold*, or **1**, **2**, **3** | Set the brush size. The eraser uses it too. |
+| *Eraser*, or **E** | Rub out ink. Press it again, or pick a colour, to go back to drawing. |
+| **Ctrl + Z**, then **Ctrl + Y** or **Ctrl + Shift + Z** (or *Undo* and *Redo*) | Undo and redo strokes. |
+| *Clear* | Start over. *Undo* brings it all back. |
+| **Done**, or **Ctrl + Enter** | Put the drawing in the note at the caret, the same way a pasted screenshot goes in. It is cropped to what you drew and scaled to the note: a drawing that used the whole width of the sheet fills the note's width, and a smaller sketch keeps its size relative to the sheet. Like any image it can be resized, captioned and opened larger. In the note, one **Ctrl + Z** takes it out again. If nothing was drawn, Done just closes. While the sheet is open, Ctrl + Enter finishes the drawing and does not log the note. |
+| **Cancel**, or **Esc** | Close without adding anything. If you drew something it asks *Discard this drawing?* first, with *Keep drawing* and *Discard*. Pressing Esc again keeps drawing. |
+| Point at a drawing in a note, then the pencil (**Edit drawing**) | Reopen it at the size it was drawn and keep drawing on top; the eraser works on it too. It opens on the sheet and in the colours of the theme it was drawn in, even if you have changed theme since, so it stays readable. Done replaces it in place and keeps its width and caption. Cancel leaves it as it was. If you clear it and press Done, it is removed from the note, and Ctrl + Z brings it back. |
+
+Resizing the window while the sheet is open never loses or stretches anything you drew. While the sheet is open, the title bar can still move, minimise or hide the window, and the drawing is still there when the window comes back. The menu, Find (Ctrl + K) and Settings (Ctrl + ,) wait until you are done, and Tab moves only between the sheet's own controls.
+
+**Folding away the formatting bar**
+
+| Do this | To |
+| --- | --- |
+| The small arrow tab on the top-right edge of the bar under a note (*Hide formatting*) | Fold the bar away so the note gets the room. A small tab stays at the bottom-right edge; click it (*Show formatting*) to bring the bar back. Your choice is remembered for every note and after a restart. Every keyboard shortcut, the selection bar and Ctrl + Shift + D keep working while the bar is hidden. |
+
+**See-through notes**
+
+If the notes cover something you need to see, such as a chart or a video you are taking notes on, make them see-through. They stay see-through while you write in them.
+
+| Do this | To |
+| --- | --- |
+| Click the drop icon next to the gear | Open the opacity control: a slider from 30 % to 100 % (the window changes as you drag it), quick choices for 50 %, 70 %, 85 % and 100 %, and a *Solid while I use it* switch. The drop shows the current state at a glance: it is full when the notes are solid, and it drains and turns teal as they become see-through. |
+| Arrow keys on the slider | Change it by 5 % per press. Page Up / Page Down change it by 10 %. Home goes to 30 %, End to 100 %. |
+| Scroll the mouse wheel over the drop | Change it by 5 % per notch (scroll up for more solid). A small readout under the drop shows the new value. You don't need to click the notes first. |
+| **Ctrl + Shift + Minus** / **Ctrl + Shift + Plus** (the = key) | Make the notes 5 % more see-through or more solid, from anywhere in the notes window. The shortcut is shown in the drop's tooltip. |
+| Right-click the tray icon, then **Opacity** | Choose 100 %, 85 %, 70 % or 50 %. A value you set in between is listed too, with a check mark. |
+| Settings (**Ctrl + ,**), *Window* section | The same slider and *Solid while I use it* switch. |
+
+The value is saved when you stop adjusting and is kept across restarts. See-through notes open see-through, without flashing solid first. The lowest setting is 30 %, so the notes never get lost on the screen.
+
+*Solid while I use it* is off by default. Turn it on if you want the notes see-through only while you are not using them. They then turn fully solid while the pointer is over them or you are typing in them, and fade back to your chosen opacity shortly after the pointer leaves and you click back into another window. Brushing past the edge of the window does not make them flicker. While you adjust the opacity, the notes show exactly the value you are choosing, even with this switch on.
+
+Changing the opacity never takes the keyboard away from your chart and never changes which window is on top. With Reduced motion the change is instant; otherwise it is a short fade.
+
+**Under the pointer**
+
+The green line that used to follow the pointer over empty board space is gone, and nothing replaces it. The pointer itself now shows what a click will do. These pointers are the app's own, drawn to match the theme (Charcoal, Midnight or Paper) and sharp at 100 to 200 % display scaling. Window edges keep the normal Windows resize pointers, and the title bar and scrollbars show the normal Windows arrow.
+
+| Pointer | Where | Means |
+| --- | --- | --- |
+| Pen nib (teal) | Empty board space | Click to start a note right there: between two notes, beside one, or at the end. |
+| Nib with a drop of ink | While the mouse button is held down on empty space | The pen is touching the page. Move away more than a few pixels before letting go and nothing is written. |
+| Pointing hand | A note's sheet, its title and tags; buttons and links | Click to open or press. |
+| I-beam | A note's text on the board; the note text, title and other text fields in the editor | Click to put the caret exactly there. |
+| Open hand / closed hand | A note's grip handle / while carrying a note (anywhere on screen) | Drag to move the note. |
+| Magnifier + / − | Images in notes and in the image preview | Zoom in or out. When zoomed in, the open and closed hand pan the image. |
+| Arrow | Everywhere else | |
+
+The app's pointers are always the standard size. If you have made the Windows mouse pointer larger or changed its colour (Settings → Accessibility → Mouse pointer and touch), that setting applies only to the window edges, the title bar and the scrollbars.
+
+**Small touches** (all turn off with Settings (**Ctrl + ,**) → *Motion* → *Reduced*; *Follow Windows* uses the Windows animation setting):
+
+- Clicking empty space leaves a quick drop of ink where you clicked, and the new note opens outward from that point.
+- Buttons give slightly when pressed and spring back when you let go. A press that starts right at the edge of a button still counts.
+- Ticking a checklist item makes the box spring and a small ring spread around it; the item's text fades and a line fades in through it. Items that are not done carry no strike, so copying a checklist into another app keeps them plain.
+- Pinning a note gives the pin a small "pushed in" pop. Unpinning doesn't.
+
+Nothing keeps moving afterwards: each effect stops by itself within about half a second.
 
 ## Backup and import
 
@@ -170,6 +237,13 @@ Not verified by automation, so worth a look on your own machine:
   (they should move to the main screen).
 - **Start with Windows.** The setting is wired to the Windows login items but was not
   exercised by a real sign-in.
+- **Drawing with a real pen or touch screen.** Pen pressure, the pen's eraser end and touch are
+  handled in code; the tests draw with a mouse.
+- **See-through notes with *Solid while I use it* switched on.** How Windows reports the pointer
+  over the title bar strip and window edges was not exercised automatically. With the switch off
+  (the default) this does not come into play.
+- **The new pointers at 125% and 150% display scaling on a real screen.** They were checked at
+  those scales on Linux, not on Windows hardware.
 - **Windows shutting down while you type.** Handled in code (pending text is written, and the
   next start is honest about anything that was not), not exercised by a real shutdown.
 

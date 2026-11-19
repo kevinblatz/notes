@@ -14,7 +14,9 @@ const ALLOWED_TAGS = [
 ]
 const ALLOWED_ATTR = [
   'href', 'style', 'start', 'type', 'checked', 'data-type', 'data-checked', 'data-color', 'data-pm-slice',
-  'data-note-image', 'data-attachment-id', 'data-width', 'data-caption', 'data-natural-width', 'data-natural-height'
+  'data-note-image', 'data-attachment-id', 'data-width', 'data-caption', 'data-natural-width', 'data-natural-height',
+  // Marks a drawing so it can still be edited after a cut and paste; NoteImage.parseHTML validates it.
+  'data-drawing'
 ]
 
 const INK = new Set<string>(INK_COLORS.map(inkVar))

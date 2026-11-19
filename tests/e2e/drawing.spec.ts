@@ -691,3 +691,38 @@ test('after a button in the selection bar was used, moving the keyboard to the t
   await page.keyboard.press('Escape')
   await ctx.quit()
 })
+
+test('a drawing that is cut and pasted can still be edited', async () => {
+  const ctx = await launch({ size: SIZE })
+  const errors = await collectConsoleErrors(ctx.page)
+  const { page } = ctx
+  await clickEmptySpace(page)
+  await page.keyboard.type('Above')
+  await openDrawingSpace(page)
+  await draw(page, [
+    [200, 300],
+    [600, 420]
+  ])
+  await tool(page, 'Done').click()
+  await expect(space(page)).toBeHidden()
+  await waitForImages(page, '.focus-editor .image-node img', 1)
+  await expect(images(page).first()).toHaveAttribute('data-drawing', '')
+
+  // Select the drawing as a block (click it), cut it, and paste it at the end of the text.
+  await images(page).first().locator('img').click()
+  await expect(images(page).first()).toHaveClass(/is-selected/)
+  await page.keyboard.press('Control+x')
+  await expect(images(page)).toHaveCount(0)
+  await editorBody(page).locator('p').first().click()
+  await page.keyboard.press('End')
+  await page.keyboard.press('Control+v')
+  await waitForImages(page, '.focus-editor .image-node img', 1)
+
+  // Still a drawing: it keeps its marker and offers Edit drawing.
+  await expect(images(page).first()).toHaveAttribute('data-drawing', '')
+  await images(page).first().hover()
+  await expect(images(page).first().getByRole('button', { name: 'Edit drawing' })).toBeVisible()
+  await ctx.quit()
+  removeDataDir(ctx.dataDir)
+  expect(errors).toEqual([])
+})

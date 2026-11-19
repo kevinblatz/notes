@@ -312,9 +312,25 @@ export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: 
 }
 
 /** Controls that appear beside selected text. */
+/**
+ * Options for Tiptap's BubbleMenu. They must keep the same identity from render to render:
+ * BubbleMenu answers every new options object or shouldShow function with an editor
+ * transaction, and a transaction re-renders this component.
+ */
+const BUBBLE_OPTIONS = { placement: 'top', offset: 8, flip: true, shift: { padding: 8 } } as const
+const showBubble = ({ editor: e, state: s }: { editor: Editor; state: Editor['state'] }): boolean => {
+  if (!e.isEditable || s.selection.empty) return false
+  // Not for a selected image block; that has its own controls.
+  return !('node' in s.selection)
+}
+
 export function SelectionBubble({ editor }: { editor: Editor }) {
   const state = useFormatState(editor)
   const [row, setRow] = useState<'ink' | 'highlight' | 'link' | null>(null)
+  // Read by the editor listeners below, which run on every transaction: they only ask React
+  // for an update when a row is actually open.
+  const rowOpen = useRef(false)
+  rowOpen.current = row !== null
   const bubble = useRef<HTMLDivElement>(null)
   // Our own key, so the bar can be told to hide (see the blur handler below).
   const [bubbleKey] = useState(() => new PluginKey('selectionBubble'))
@@ -322,6 +338,7 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
   // the keyboard left the note) the row goes with it, together with its claim on Esc below.
   useEffect(() => {
     const onTransaction = (): void => {
+      if (!rowOpen.current) return
       const { selection } = editor.state
       if (selection.empty || 'node' in selection) setRow(null)
     }
@@ -331,7 +348,7 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
       // The whole window lost the keyboard (the chart was clicked): leave everything as it
       // was, so coming back finds the open row exactly where it was left.
       if (!document.hasFocus()) return
-      setRow(null)
+      if (rowOpen.current) setRow(null)
       // The keyboard moved elsewhere in this window (the title, a caption, the drawing
       // space): the bar goes too. Tiptap's bar skips hiding on the first blur after any press
       // inside it, which left it floating over the text once one of its buttons was used.
@@ -362,12 +379,8 @@ export function SelectionBubble({ editor }: { editor: Editor }) {
     <BubbleMenu
       editor={editor}
       pluginKey={bubbleKey}
-      options={{ placement: 'top', offset: 8, flip: true, shift: { padding: 8 } }}
-      shouldShow={({ editor: e, state: s }) => {
-        if (!e.isEditable || s.selection.empty) return false
-        // Not for a selected image block; that has its own controls.
-        return !('node' in s.selection)
-      }}
+      options={BUBBLE_OPTIONS}
+      shouldShow={showBubble}
     >
       <div ref={bubble} className="bubble" role="toolbar" aria-label="Selection formatting">
         <div className="bubble-row">
