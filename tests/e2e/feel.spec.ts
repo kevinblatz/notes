@@ -343,6 +343,9 @@ test('ticking, pinning and pressing give feedback without moving anything, and t
   await expect(box).toBeChecked()
   expect(await size()).toEqual(before)
   await expect(card.locator('li[data-checked="true"] > div')).toHaveCSS('text-decoration-line', 'line-through')
+  // An item that is not done carries no strike at all, not even an invisible one (text copied
+  // out of the board would take it along).
+  await expect(card.locator('li[data-checked="false"] > div')).toHaveCSS('text-decoration-line', 'none')
   await expect.poll(() => runningAnimations(page)).toEqual([])
   expect(await motion()).toEqual(expect.arrayContaining(['transition:box-shadow:input', 'transition:transform:input', 'transition:color:div', 'transition:text-decoration-color:div']))
 
@@ -369,6 +372,23 @@ test('ticking, pinning and pressing give feedback without moving anything, and t
   await page.waitForTimeout(600)
   const replayed = (await motion()).filter((entry) => /pin-|ink-|note-bloom|box-shadow|text-decoration/.test(entry))
   expect(replayed).toEqual([])
+
+  // A pop that opening the note cuts short does not play again when the board comes back.
+  await card.hover({ position: { x: 30, y: 12 } })
+  await card.getByRole('button', { name: 'Unpin' }).click()
+  await card.getByRole('button', { name: 'Pin', exact: true }).click()
+  // Hold it mid-way, so the note is certainly opened while it is still going.
+  await page.evaluate(() => document.getAnimations().forEach((a) => (a as CSSAnimation).animationName?.startsWith('pin-') && a.pause()))
+  await expect(card.locator('.is-popping')).toHaveCount(1)
+  await card.locator('.prose li p').first().click()
+  await expect(focusView(page)).toBeVisible()
+  // Read at once, not retried: a pop that was still pending would show here and on return.
+  expect(await card.locator('.is-popping').count()).toBe(0)
+  await page.keyboard.press('Escape')
+  await expect(focusView(page)).toBeHidden()
+  expect(await card.locator('.is-popping').count()).toBe(0)
+  expect(await page.evaluate(() => document.getAnimations().filter((a) => (a as CSSAnimation).animationName?.startsWith('pin-')).length)).toBe(0)
+  await motion()
 
   // Press: a text button shrinks a touch but keeps its place and its full hit area, so a
   // press that starts right at its edge still counts.
