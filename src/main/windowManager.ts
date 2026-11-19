@@ -7,10 +7,15 @@
  * direct response to the user asking for the notes (tray click, global shortcut, launching
  * the app again). There is no blur handler that re-focuses, no fullscreen overlay and no
  * click-through surface: this is an ordinary top-level window with the topmost flag set.
+ *
+ * Opacity: the window can be made see-through (BrowserWindow.setOpacity) so whatever it covers
+ * shows through. With "solid while I use it" it turns solid while the pointer is over it or it
+ * has the keyboard. Changing opacity never touches focus, position or z-order.
  */
 import { pathToFileURL } from 'node:url'
-import { BrowserWindow, screen, type Display, type Rectangle } from 'electron'
+import { BrowserWindow, screen, systemPreferences, type Display, type Rectangle } from 'electron'
 import { IPC } from '@shared/ipc'
+import { clampOpacity, windowOpacityTarget } from '@shared/preferences'
 import type { DockSide, MainEvents, Preferences, WindowStatus } from '@shared/types'
 import {
   dockBounds,
@@ -44,6 +49,41 @@ export interface WindowManagerOptions {
 /** How long after a monitor change window moves are attributed to Windows rather than to the user. */
 const DISPLAY_SETTLE_MS = 1500
 
+/** The pointer counts as gone only after this long, so brushing past the edge does not flicker. */
+const POINTER_LEAVE_MS = 250
+/** A change of opacity fades in this many steps, this far apart: about 150 ms in all. */
+const FADE_STEPS = 6
+const FADE_STEP_MS = 30
+// Over the title bar's drag strip and the resize border, Windows sends "non-client" mouse
+// messages instead of page mouse events, so the page sees the pointer as gone. These two say
+// that the pointer is over that part of the window, and that it has left it.
+const WM_NCMOUSEMOVE = 0x00a0
+const WM_NCMOUSELEAVE = 0x02a2
+
+/** Where a pointer report comes from: the page itself, or the window frame (Windows only). */
+export type PointerSource = 'page' | 'frame'
+
+/** Everything that decides the window's opacity, for the automated desktop tests. */
+export interface OpacityState {
+  chosen: number
+  solidOnHover: boolean
+  preview: number | null
+  pointerInside: boolean
+  focused: boolean
+  /** The opacity the app last asked for: where the current fade ends. */
+  requested: number
+  /** The value last given to the window (during a fade, a step on the way). */
+  applied: number
+  /** What the window reports. Only Windows and macOS can change it; elsewhere it stays 1. */
+  native: number
+  /** The opacity the window was given when it was created, before it was first shown. */
+  initial: number
+  fading: boolean
+  leavePending: boolean
+  /** The values applied for the latest change: one for an instant change, several for a fade. */
+  lastChange: number[]
+}
+
 /** Equal within a couple of pixels, to absorb rounding at fractional display scale factors. */
 const rectsNear = (a: Rect, b: Rect): boolean =>
   Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2 && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2
@@ -69,6 +109,22 @@ export class WindowManager {
   private displayTimer: NodeJS.Timeout | null = null
   private flushWaiters = new Map<string, (saved: boolean) => void>()
   private flushCounter = 0
+
+  // Opacity. The pointer is over the notes when it is over the page or over the window frame.
+  private pointerOnPage = false
+  private pointerOnFrame = false
+  /** The pointer state opacity follows: becomes false only POINTER_LEAVE_MS after the pointer left. */
+  private pointerInside = false
+  private hasKeyboard = false
+  private opacityPreview: number | null = null
+  private requestedOpacity = 1
+  private appliedOpacity = 1
+  private initialOpacity = 1
+  /** Windows turns a window into a layered window the first time its opacity is set. */
+  private layered = false
+  private leaveTimer: NodeJS.Timeout | null = null
+  private fadeTimer: NodeJS.Timeout | null = null
+  private lastChange: number[] = []
 
   constructor(private readonly options: WindowManagerOptions) {}
 

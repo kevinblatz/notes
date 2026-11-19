@@ -25,6 +25,10 @@ export const IPC = {
   edit: 'tn:edit',
   flushDone: 'tn:flush-done',
   unsaved: 'tn:unsaved',
+  /** window -> main, no reply: the pointer came onto the page (true) or left it (false). */
+  pointer: 'tn:window:pointer',
+  /** window -> main, no reply: show this opacity now because the user is adjusting it (null: done). */
+  opacityPreview: 'tn:window:opacity-preview',
   /** main -> window */
   event: 'tn:event'
 } as const
