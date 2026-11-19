@@ -8,18 +8,23 @@ import {
   expandRect,
   exportScale,
   intersectRect,
+  matchColor,
   MAX_EXPORT_EDGE,
   MAX_EXPORT_PIXELS,
+  parseHexColor,
+  pathLength,
   placeCentered,
   pointsBounds,
   pushPoint,
   removeBackground,
   snapRectOut,
+  taperShare,
   unionRect,
   visibleOps,
   type DrawOp,
   type InkPoint
 } from '@shared/drawing'
+import { BRUSH_SIZES, penOutline } from '../../src/renderer/src/components/editor/drawingStroke'
 
 const IMG = 'aaaaaaaa-1111-2222-3333-444444444444'
 
@@ -33,6 +38,52 @@ describe('stroke points', () => {
       [10, 10, 0.5],
       [11, 10, 0.5]
     ])
+  })
+})
+
+describe('short marks', () => {
+  /** Area of a closed polygon. */
+  const area = (outline: number[][]): number => {
+    let twice = 0
+    for (let i = 0; i < outline.length; i++) {
+      const [x0, y0] = outline[i]!
+      const [x1, y1] = outline[(i + 1) % outline.length]!
+      twice += x0! * y1! - x1! * y0!
+    }
+    return Math.abs(twice / 2)
+  }
+  const line = (length: number): InkPoint[] => {
+    const points: InkPoint[] = []
+    for (let x = 0; x < length; x += 0.7) points.push([100 + x, 50, 0.5])
+    points.push([100 + length, 50, 0.5])
+    return points
+  }
+
+  it('measures a line and grows the taper in only once the line is long enough for it', () => {
+    expect(pathLength([])).toBe(0)
+    expect(pathLength([[0, 0, 0.5], [3, 4, 0.5], [3, 10, 0.5]])).toBe(11)
+    expect(taperShare(0, 20)).toBe(0)
+    expect(taperShare(20, 20)).toBe(0)
+    expect(taperShare(30, 20)).toBe(0.5)
+    expect(taperShare(400, 20)).toBe(1)
+    expect(taperShare(10, 0)).toBe(0)
+  })
+
+  it('a tap leaves a dot the size of the brush, and no short tick vanishes', () => {
+    for (const size of BRUSH_SIZES) {
+      const dot = penOutline([[100, 50, 0.5]], { size, pressure: false })
+      const ys = dot.map((point) => point[1]!)
+      expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(size, 1)
+      // Light pen pressure: a smaller dot, never nothing.
+      const light = penOutline([[100, 50, 0.1]], { size, pressure: true })
+      expect(area(light)).toBeGreaterThan(0.5)
+      expect(area(light)).toBeLessThan(area(dot))
+      for (const length of [0.3, 1, 2, 4, 6, 9, 12, 16, 20, 25, 35, 50, 80]) {
+        // At least half the ink a plain round-ended line of that length would have.
+        const ideal = size * length + (Math.PI * size * size) / 4
+        expect(area(penOutline(line(length), { size, pressure: false })), `size ${size}, length ${length}`).toBeGreaterThan(ideal / 2)
+      }
+    }
   })
 })
 
@@ -127,6 +178,30 @@ describe('reopening a saved drawing', () => {
     for (let i = 0; i < width * height; i++) data.set([37, 38, 42, 255], i * 4)
     data.set([200, 0, 0, 255], 0) // ink touching one corner does not fool it
     expect(cornerColor(data, width, height)).toEqual([37, 38, 42])
+  })
+})
+
+describe('the theme a drawing was made in', () => {
+  it('reads #rgb and #rrggbb colours and nothing else', () => {
+    expect(parseHexColor('#25262a')).toEqual([37, 38, 42])
+    expect(parseHexColor(' #F5F3ED ')).toEqual([245, 243, 237])
+    expect(parseHexColor('#fff')).toEqual([255, 255, 255])
+    for (const bad of ['', '#12345', '#1234567', 'rgb(1, 2, 3)', '#ggg', 'red']) expect(parseHexColor(bad)).toBeNull()
+  })
+
+  it('tells which sheet a drawing was painted on, allowing for rounding', () => {
+    const sheets = [
+      ['charcoal', '#25262a'],
+      ['midnight', '#1a1b1e'],
+      ['paper', '#f5f3ed']
+    ] as const
+    expect(matchColor([37, 38, 42], sheets)).toBe('charcoal')
+    expect(matchColor([27, 26, 31], sheets)).toBe('midnight')
+    expect(matchColor([245, 243, 237], sheets)).toBe('paper')
+    // Not one of the app's sheets (or too far from it): unknown.
+    expect(matchColor([255, 255, 255], sheets)).toBeNull()
+    expect(matchColor([42, 38, 42], sheets)).toBeNull()
+    expect(matchColor([37, 38, 42], [['broken', 'var(--sheet)']])).toBeNull()
   })
 })
 

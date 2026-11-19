@@ -13,16 +13,15 @@ import { Eraser, Redo2, Trash2, Undo2 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { displayWidthPercent, placeCentered, pushPoint, type DrawOp, type InkPoint } from '@shared/drawing'
+import type { ThemeKey } from '@shared/types'
 import { useEscape } from '../../lib/escape'
 import { importImageFile } from '../../lib/images'
 import { toast } from '../../state/actions'
 import { useStore } from '../../state/store'
 import { IconButton } from '../ui'
 import {
-  BRUSH_SIZES,
   brushCursor,
   colorLabel,
-  colorVar,
   DRAW_COLORS,
   ERASER_SIZES,
   eraseSegment,
@@ -33,16 +32,16 @@ import {
   paintScene,
   paintStroke,
   penPath,
-  resolvePalette,
-  sheetColor,
   SIZE_LABELS,
+  themeInks,
+  themeOfSheet,
   type BaseLayer,
   type DrawColor,
   type DrawTool,
-  type Palette,
   type Stroke
 } from './drawingInk'
 import { closeDrawing, type DrawingTarget } from './drawingSession'
+import { BRUSH_SIZES } from './drawingStroke'
 import { insertDrawingNode, removeDrawingNode, replaceDrawingNode } from './extensions'
 
 /** Kept clear for the toolbar when an edited drawing is placed on the sheet. */
@@ -87,10 +86,15 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
   const confirmRef = useRef<HTMLDivElement>(null)
   const [scene] = useState<Scene>(() => ({ ops: [], redo: [], base: null, active: null }))
   const surface = useRef<Surface | null>(null)
-  const palette = useRef<Palette | null>(null)
   const pointer = useRef<{ id: number | null; frame: number; erased: number; predicted: InkPoint[] }>({ id: null, frame: 0, erased: 0, predicted: [] })
 
   const theme = useStore((s) => s.prefs.theme)
+  // An edited drawing stays on the sheet and in the colours it was drawn with, even when the
+  // app has changed theme since (light ink of a dark theme would vanish on a light sheet).
+  const [ownTheme, setOwnTheme] = useState<ThemeKey | null>(null)
+  const inks = useMemo(() => themeInks(ownTheme ?? theme), [ownTheme, theme])
+  const inksRef = useRef(inks)
+  inksRef.current = inks
   const [tool, setTool] = useState<DrawTool>('pen')
   const [color, setColor] = useState<DrawColor>(remembered.color)
   const [sizeIndex, setSizeIndex] = useState(remembered.sizeIndex)
@@ -105,8 +109,10 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
   settings.current = { tool, color, sizeIndex }
   const blocked = useRef(false)
   blocked.current = busy || confirming || loading
-  remembered.color = color
-  remembered.sizeIndex = sizeIndex
+  useEffect(() => {
+    remembered.color = color
+    remembered.sizeIndex = sizeIndex
+  }, [color, sizeIndex])
 
   const sync = useCallback((): void => {
     setStatus({ canUndo: scene.ops.length > 0, canRedo: scene.redo.length > 0, hasInk: hasVisibleInk(scene.base, scene.ops) })
@@ -128,7 +134,7 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
     s.ink.setTransform(1, 0, 0, 1, 0, 0)
     s.ink.clearRect(0, 0, s.ink.canvas.width, s.ink.canvas.height)
     s.ink.setTransform(s.scale, 0, 0, s.scale, 0, 0)
-    const colors = resolvePalette()
+    const colors = inksRef.current.palette
     paintScene(s.ink, scene.base, scene.ops, colors)
     // An eraser stroke in progress has already taken its bite out of the old picture.
     if (scene.active?.tool === 'eraser') paintStroke(s.ink, scene.active, colors)
@@ -143,7 +149,7 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
     if (!stroke || !s) return
     if (stroke.tool === 'pen') {
       clearLive(s)
-      s.live.fillStyle = palette.current?.[stroke.color] ?? '#888'
+      s.live.fillStyle = inksRef.current.palette[stroke.color]
       s.live.fill(penPath(state.predicted.length > 0 ? [...stroke.points, ...state.predicted] : stroke.points, stroke))
     } else {
       const points = stroke.points
@@ -168,7 +174,7 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
     if (s) {
       if (stroke.tool === 'pen') {
         clearLive(s)
-        paintStroke(s.ink, stroke, palette.current ?? resolvePalette())
+        paintStroke(s.ink, stroke, inksRef.current.palette)
       } else {
         const points = stroke.points
         for (; state.erased < points.length; state.erased++) eraseSegment(s.ink, points[Math.max(0, state.erased - 1)]!, points[state.erased]!, stroke.size)
@@ -235,7 +241,11 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
         const at = placeCentered(loaded.width, loaded.height, width, height - TOOLBAR_RESERVE)
         // On whole device pixels, so the picture is shown and saved again without any blur.
         scene.base = { image: loaded.image, x: Math.round(at.x * scale) / scale, y: Math.round(at.y * scale) / scale, width: loaded.width, height: loaded.height }
-        redrawInk()
+        const drawnIn = themeOfSheet(loaded.background)
+        if (drawnIn && drawnIn !== theme) {
+          // Painted again by the effect below once the drawing's own colours are in place.
+          setOwnTheme(drawnIn)
+        } else redrawInk()
         sync()
         setLoading(false)
       },
@@ -297,7 +307,6 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
       state.id = event.pointerId
       state.erased = 0
       state.predicted = []
-      palette.current = resolvePalette()
       scene.active = {
         tool: erasing ? 'eraser' : 'pen',
         color: current.color,
@@ -388,7 +397,7 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
     setBusy(true)
     blocked.current = true
     try {
-      const exported = await exportDrawing(scene.base, scene.ops, surface.current?.scale ?? window.devicePixelRatio ?? 1)
+      const exported = await exportDrawing(scene.base, scene.ops, surface.current?.scale ?? window.devicePixelRatio ?? 1, inksRef.current)
       if (!exported) {
         // Nothing left on the sheet. An edited drawing that was wiped leaves the note (Ctrl+Z there brings it back).
         if (target.kind === 'edit') removeDrawingNode(editor, target.attachmentId, target.getPos())
@@ -431,6 +440,22 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
   const keys = useRef({ undo, redo, done, setTool, setSizeIndex })
   keys.current = { undo, redo, done, setTool, setSizeIndex }
   useEffect(() => {
+    /**
+     * Tab stays inside the sheet (or inside the question while it shows), wherever the
+     * keyboard is: also after a focused button turned disabled, or after the title bar's
+     * Minimize or Hide was clicked, so it can never reach the note behind or the menu.
+     */
+    const trapTab = (backwards: boolean): void => {
+      const scope = confirmRef.current ?? layerRef.current
+      const items = Array.from(scope?.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"])') ?? [])
+      if (items.length === 0) {
+        layerRef.current?.focus({ preventScroll: true })
+        return
+      }
+      const index = items.indexOf(document.activeElement as HTMLElement)
+      const next = index === -1 ? (backwards ? items.length - 1 : 0) : (index + (backwards ? -1 : 1) + items.length) % items.length
+      items[next]!.focus()
+    }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.isComposing || event.key === 'Escape') return
       const mod = event.ctrlKey || event.metaKey
@@ -438,6 +463,11 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
       const stop = (): void => {
         event.preventDefault()
         event.stopPropagation()
+      }
+      if (event.key === 'Tab' && !mod && !event.altKey) {
+        stop()
+        trapTab(event.shiftKey)
+        return
       }
       if (mod && !event.altKey) {
         if (key === 'enter') {
@@ -468,30 +498,15 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [])
 
-  // The ink colours follow the theme.
+  // The ink is painted in the colours of the sheet's theme (again when they change).
   useEffect(() => {
     redrawInk()
-  }, [theme, redrawInk])
-
-  // Tab stays inside the sheet (or inside the question while it shows).
-  const trapTab = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== 'Tab') return
-    const scope = confirmRef.current ?? layerRef.current
-    const items = Array.from(scope?.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"])') ?? [])
-    if (items.length === 0) return
-    const index = items.indexOf(document.activeElement as HTMLElement)
-    event.preventDefault()
-    const next = event.shiftKey ? (index <= 0 ? items.length - 1 : index - 1) : index === -1 || index === items.length - 1 ? 0 : index + 1
-    items[next]!.focus()
-  }
+  }, [inks, redrawInk])
 
   const cursor = useMemo(() => {
-    const colors = resolvePalette()
-    const dark = lightness(sheetColor()) < 0.5
-    return tool === 'eraser' ? brushCursor('eraser', ERASER_SIZES[sizeIndex]!, readSoftInk(), dark) : brushCursor('pen', BRUSH_SIZES[sizeIndex]!, colors[color], dark)
-    // The theme changes the colours behind the variables.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tool, color, sizeIndex, theme])
+    const dark = lightness(inks.sheet) < 0.5
+    return tool === 'eraser' ? brushCursor('eraser', ERASER_SIZES[sizeIndex]!, inks.soft, dark) : brushCursor('pen', BRUSH_SIZES[sizeIndex]!, inks.palette[color], dark)
+  }, [tool, color, sizeIndex, inks])
 
   /** Colours and sizes are each one stop for Tab; the arrow keys choose within them. */
   const arrowKeys = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
@@ -515,16 +530,17 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
   return createPortal(
     <div
       ref={layerRef}
-      className={`draw-layer${busy ? ' is-busy' : ''}`}
-      style={{ top }}
+      className={`draw-layer${busy ? ' is-busy' : ''}${loading ? ' is-loading' : ''}`}
+      style={{ top, background: inks.sheet }}
       role="dialog"
       aria-modal="true"
       aria-label="Drawing space"
+      aria-busy={loading || busy}
       tabIndex={-1}
       data-overlay
       data-testid="drawing-space"
       data-mode={target.kind}
-      onKeyDown={trapTab}
+      data-sheet-theme={ownTheme ?? theme}
     >
       <canvas ref={inkRef} className="draw-canvas" data-testid="drawing-ink" aria-hidden="true" />
       <canvas ref={liveRef} className="draw-canvas draw-input" style={{ cursor }} role="img" aria-label="Drawing sheet. Draw with the mouse or a pen." data-testid="drawing-canvas" />
@@ -547,7 +563,7 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
               aria-label={colorLabel(name)}
               title={colorLabel(name)}
               className="draw-swatch"
-              style={{ ['--swatch' as string]: `var(${colorVar(name)})` }}
+              style={{ ['--swatch' as string]: inks.palette[name] }}
               onClick={() => pickColor(name)}
             />
           ))}
@@ -610,8 +626,4 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
     </div>,
     document.body
   )
-}
-
-function readSoftInk(): string {
-  return getComputedStyle(document.documentElement).getPropertyValue('--ink-soft').trim() || '#b9b3a8'
 }

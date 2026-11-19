@@ -1,9 +1,8 @@
 /**
- * Ink for the drawing space: brush settings, turning sampled points into smooth tapered
- * outlines (perfect-freehand), painting strokes and the eraser on a canvas, and exporting
- * the finished drawing as a PNG cropped to what was drawn.
+ * Ink for the drawing space: brush settings, the theme's colours, painting strokes (shaped
+ * in drawingStroke.ts) and the eraser on a canvas, and exporting the finished drawing as a
+ * PNG cropped to what was drawn.
  */
-import { getStroke, type StrokeOptions } from 'perfect-freehand'
 import { INK_COLORS } from '@shared/content'
 import {
   alphaBounds,
@@ -12,7 +11,9 @@ import {
   expandRect,
   exportScale,
   intersectRect,
+  matchColor,
   MAX_DRAWING_BYTES,
+  parseHexColor,
   pointsBounds,
   removeBackground,
   snapRectOut,
@@ -22,27 +23,24 @@ import {
   type InkPoint,
   type Rect
 } from '@shared/drawing'
-import { attachmentUrl } from '@shared/types'
+import { THEMES } from '@shared/preferences'
+import { attachmentUrl, type ThemeKey } from '@shared/types'
+import { penOutline, type PenSettings } from './drawingStroke'
 
 /** The note's own ink colours, led by the theme's text colour. */
 export const DRAW_COLORS = ['ink', ...INK_COLORS] as const
 export type DrawColor = (typeof DRAW_COLORS)[number]
 
 export const SIZE_LABELS = ['Fine', 'Medium', 'Bold'] as const
-/** Pen diameters at normal pressure, in CSS pixels. */
-export const BRUSH_SIZES = [2.5, 5, 10] as const
 /** Eraser diameters, in CSS pixels (its cursor ring stays within 32 px). */
 export const ERASER_SIZES = [12, 20, 28] as const
 
 export type DrawTool = 'pen' | 'eraser'
 
-export interface Stroke {
+/** One stroke of the pen or the eraser (`size` is the eraser's diameter for the eraser). */
+export interface Stroke extends PenSettings {
   tool: DrawTool
   color: DrawColor
-  /** Diameter in CSS pixels. */
-  size: number
-  /** True when the pressure came from a pen; a mouse's pressure is simulated from its speed. */
-  pressure: boolean
   points: InkPoint[]
 }
 
@@ -57,44 +55,61 @@ export interface BaseLayer {
 
 export type Palette = Record<DrawColor, string>
 
-export const colorVar = (color: DrawColor): string => (color === 'ink' ? '--ink' : `--ink-${color}`)
+/**
+ * A theme's colours as real values (the export is a picture, not a page that knows the
+ * variables): the sheet a drawing is painted on, its ink colours, and the soft ink the
+ * eraser's ring is drawn in.
+ */
+export interface Inks {
+  sheet: string
+  soft: string
+  palette: Palette
+}
+
+const colorVar = (color: DrawColor): string => (color === 'ink' ? '--ink' : `--ink-${color}`)
 
 export function colorLabel(color: DrawColor): string {
   return color === 'ink' ? 'Ink' : color[0]!.toUpperCase() + color.slice(1)
 }
 
-function readVar(name: string, fallback: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
-}
-
-/** The theme's colours as real values: the export is a picture, not a page that knows the variables. */
-export function resolvePalette(): Palette {
-  return Object.fromEntries(DRAW_COLORS.map((color) => [color, readVar(colorVar(color), '#888888')])) as Palette
-}
-
-export function sheetColor(): string {
-  return readVar('--sheet', '#25262a')
-}
-
-/** Brush feel: a little smoothing and a short taper at both ends; speed thins a mouse line slightly. */
-function strokeOptions(stroke: Stroke): StrokeOptions {
-  return {
-    size: stroke.size,
-    thinning: stroke.pressure ? 0.62 : 0.42,
-    smoothing: 0.6,
-    // Little streamlining: the line stays where the pointer went, corners included.
-    streamline: 0.2,
-    simulatePressure: !stroke.pressure,
-    start: { taper: Math.max(4, stroke.size * 1.4), cap: true },
-    end: { taper: Math.max(6, stroke.size * 2), cap: true },
-    // The outline always ends exactly at the pointer, so the line never trails behind it.
-    last: true
+/**
+ * The colours of a theme, read from a hidden element that carries it. Read by theme name
+ * rather than from the window, so they are right even before the window has switched to a
+ * newly chosen theme, and for a drawing that was made in another theme. A theme that only
+ * changes a few tokens (midnight) is laid over the base theme, as it is on the window.
+ */
+export function themeInks(theme: ThemeKey): Inks {
+  const base = document.createElement('div')
+  base.dataset.theme = 'charcoal'
+  base.hidden = true
+  const probe = document.createElement('div')
+  probe.dataset.theme = theme
+  base.append(probe)
+  document.body.append(base)
+  try {
+    const style = getComputedStyle(probe)
+    const read = (name: string, fallback: string): string => style.getPropertyValue(name).trim() || fallback
+    return {
+      sheet: read('--sheet', '#25262a'),
+      soft: read('--ink-soft', '#b9b3a8'),
+      palette: Object.fromEntries(DRAW_COLORS.map((color) => [color, read(colorVar(color), '#888888')])) as Palette
+    }
+  } finally {
+    base.remove()
   }
+}
+
+/** The app theme whose sheet a saved drawing was painted on (its corner colour), if any. */
+export function themeOfSheet(background: readonly [number, number, number]): ThemeKey | null {
+  return matchColor(
+    background,
+    THEMES.map((theme) => [theme, themeInks(theme).sheet] as const)
+  )
 }
 
 /** Closed outline of a pen stroke as a smooth path (quadratic curves through midpoints). */
 export function penPath(points: readonly InkPoint[], stroke: Stroke): Path2D {
-  const outline = getStroke(points as unknown as number[][], strokeOptions(stroke))
+  const outline = penOutline(points, stroke)
   const path = new Path2D()
   const count = outline.length
   if (count < 2) return path
@@ -152,7 +167,7 @@ export function paintStroke(ctx: Context2D, stroke: Stroke, palette: Palette): v
   ctx.fill(finishedPath(stroke))
 }
 
-export function paintBase(ctx: Context2D, base: BaseLayer): void {
+function paintBase(ctx: Context2D, base: BaseLayer): void {
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(base.image, base.x, base.y, base.width, base.height)
@@ -166,7 +181,7 @@ export function paintScene(ctx: Context2D, base: BaseLayer | null, ops: readonly
 }
 
 /** Upper bound of where ink can be: pen strokes and the starting picture (erasing only removes ink). */
-export function sceneBounds(base: BaseLayer | null, ops: readonly DrawOp<Stroke>[]): Rect | null {
+function sceneBounds(base: BaseLayer | null, ops: readonly DrawOp<Stroke>[]): Rect | null {
   const { strokes, baseVisible } = visibleOps(ops)
   let bounds: Rect | null = base && baseVisible ? { x: base.x, y: base.y, width: base.width, height: base.height } : null
   for (const stroke of strokes) {
@@ -184,10 +199,13 @@ export function hasVisibleInk(base: BaseLayer | null, ops: readonly DrawOp<Strok
 /**
  * Reopen a finished drawing for editing: its original file, turned back into ink on a
  * transparent layer (the sheet colour it was saved on is taken out again), with its size in
- * CSS pixels as it was drawn. Loaded as an image (the window may show attachments but not
- * fetch them); the attachment scheme allows the pixels to be read back.
+ * CSS pixels as it was drawn, and that sheet colour. Loaded as an image (the window may show
+ * attachments but not fetch them); the attachment scheme allows the pixels to be read back.
  */
-export async function loadDrawing(attachmentId: string, scale: number): Promise<{ image: OffscreenCanvas; width: number; height: number }> {
+export async function loadDrawing(
+  attachmentId: string,
+  scale: number
+): Promise<{ image: OffscreenCanvas; width: number; height: number; background: [number, number, number] }> {
   const picture = new Image()
   picture.crossOrigin = 'anonymous'
   picture.src = attachmentUrl(attachmentId, 'full')
@@ -197,9 +215,10 @@ export async function loadDrawing(attachmentId: string, scale: number): Promise<
   if (!context) throw new Error('The drawing could not be opened.')
   context.drawImage(picture, 0, 0)
   const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
-  removeBackground(pixels.data, cornerColor(pixels.data, canvas.width, canvas.height))
+  const background = cornerColor(pixels.data, canvas.width, canvas.height)
+  removeBackground(pixels.data, background)
   context.putImageData(pixels, 0, 0)
-  return { image: canvas, width: canvas.width / scale, height: canvas.height / scale }
+  return { image: canvas, width: canvas.width / scale, height: canvas.height / scale, background }
 }
 
 /**
@@ -223,10 +242,9 @@ export function brushCursor(tool: DrawTool, diameter: number, color: string, dar
 
 /** Rough lightness of a #rrggbb colour, 0..1. */
 export function lightness(hex: string): number {
-  const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex.trim())
-  if (!match) return 0
-  const [r, g, b] = [match[1]!, match[2]!, match[3]!].map((part) => Number.parseInt(part, 16) / 255) as [number, number, number]
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  const rgb = parseHexColor(hex)
+  if (!rgb) return 0
+  return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255
 }
 
 export interface ExportedDrawing {
@@ -243,12 +261,11 @@ export interface ExportedDrawing {
  * screenshot), cropped to the ink plus a small margin, at the screen's pixel density. Null
  * when no ink is left. Larger than the attachment limit: drawn again at a lower density.
  */
-export async function exportDrawing(base: BaseLayer | null, ops: readonly DrawOp<Stroke>[], devicePixelRatio: number): Promise<ExportedDrawing | null> {
+export async function exportDrawing(base: BaseLayer | null, ops: readonly DrawOp<Stroke>[], devicePixelRatio: number, inks: Inks): Promise<ExportedDrawing | null> {
   const upper = sceneBounds(base, ops)
   if (!upper) return null
   const area = snapRectOut(expandRect(upper, DRAWING_MARGIN))
-  const palette = resolvePalette()
-  const background = sheetColor()
+  const { palette, sheet: background } = inks
   let scale = exportScale(area.width, area.height, devicePixelRatio)
   for (let attempt = 0; attempt < 6; attempt++) {
     // Device pixels are counted from the drawing space's own origin, so the starting picture

@@ -53,6 +53,23 @@ export function pushPoint(points: InkPoint[], point: InkPoint, minDistance = MIN
   return true
 }
 
+/** Length of the line through the points, in CSS pixels. */
+export function pathLength(points: readonly InkPoint[]): number {
+  let length = 0
+  for (let i = 1; i < points.length; i++) length += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1])
+  return length
+}
+
+/**
+ * How much of its full taper a stroke of this length gets (0 to 1). A taper thins a line's
+ * ends to a point, so a tap or a short tick that is all taper would not show at all: short
+ * marks get round ends, and the taper grows in as the line gets longer than its two tapers.
+ */
+export function taperShare(length: number, fullTaper: number): number {
+  if (!(fullTaper > 0)) return 0
+  return Math.min(1, Math.max(0, (length - fullTaper) / fullTaper))
+}
+
 /** Bounding box of a list of points, grown by `pad` on every side (the stroke's own radius). */
 export function pointsBounds(points: readonly InkPoint[], pad: number): Rect | null {
   if (points.length === 0) return null
@@ -178,6 +195,26 @@ export function cornerColor(data: ArrayLike<number>, width: number, height: numb
     }
   }
   return best
+}
+
+/** A #rgb or #rrggbb colour as [red, green, blue] (0-255); null for anything else. */
+export function parseHexColor(value: string): [number, number, number] | null {
+  const hex = value.trim().replace(/^#/, '')
+  const full = /^[0-9a-f]{3}$/i.test(hex) ? hex.replace(/./g, (digit) => digit + digit) : hex
+  if (!/^[0-9a-f]{6}$/i.test(full)) return null
+  return [Number.parseInt(full.slice(0, 2), 16), Number.parseInt(full.slice(2, 4), 16), Number.parseInt(full.slice(4, 6), 16)]
+}
+
+/**
+ * Which of the named colours `rgb` is (within `tolerance` per channel): used to tell which
+ * theme's sheet a saved drawing was painted on. Null when it is none of them.
+ */
+export function matchColor<K extends string>(rgb: readonly [number, number, number], candidates: ReadonlyArray<readonly [K, string]>, tolerance = 2): K | null {
+  for (const [name, value] of candidates) {
+    const color = parseHexColor(value)
+    if (color && color.every((channel, i) => Math.abs(channel - rgb[i]!) <= tolerance)) return name
+  }
+  return null
 }
 
 /** Pixels at least this far from the sheet colour towards their own are solid ink. */
