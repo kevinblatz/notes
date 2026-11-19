@@ -184,6 +184,7 @@ export async function collectConsoleErrors(page: Page): Promise<string[]> {
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text())
   })
-  page.on('pageerror', (error) => errors.push(String(error)))
+  // With the stack, so a failure on CI says where it came from, not only what it was.
+  page.on('pageerror', (error) => errors.push(error.stack ?? String(error)))
   return errors
 }
