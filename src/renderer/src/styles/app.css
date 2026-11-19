@@ -610,8 +610,11 @@ kbd {
 .prose ul[data-type='taskList'] > li > div {
   flex: 1;
   min-width: 0;
-  /* Present but invisible until the item is done, so the strike can fade in. */
-  text-decoration: line-through transparent;
+  /*
+   * No strike until the item is done (not even an invisible one: text copied out of the board
+   * would carry it), but its colour starts clear so the strike fades in when it is ticked.
+   */
+  text-decoration-color: transparent;
 }
 .prose ul[data-type='taskList'] > li input[type='checkbox'] {
   appearance: none;
@@ -642,6 +645,7 @@ kbd {
 }
 .prose ul[data-type='taskList'] > li[data-checked='true'] > div {
   color: var(--ink-faint);
+  text-decoration-line: line-through;
   text-decoration-color: var(--line-strong);
 }
 .prose blockquote {

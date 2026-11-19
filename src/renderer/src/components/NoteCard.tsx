@@ -5,14 +5,14 @@
  */
 import { useDraggable } from '@dnd-kit/core'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronsDownUp, ChevronsUpDown, Ellipsis, GripVertical, Pencil, Pin, PinOff, Trash2 } from 'lucide-react'
-import { memo, useCallback, useRef, useState, type AnimationEvent, type KeyboardEvent, type MouseEvent } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type AnimationEvent, type KeyboardEvent, type MouseEvent } from 'react'
 import { noteLabel } from '@shared/content'
 import type { MoveDirection } from '@shared/layout'
 import type { Note } from '@shared/types'
 import { api } from '../lib/api'
 import { motionReduced } from '../lib/flip'
 import { moveNoteByKeyboard, openImagePreview, openNote, setCollapsed, togglePin, toggleTask, trashNote } from '../state/actions'
-import type { CaretHint } from '../state/store'
+import { useStore, type CaretHint } from '../state/store'
 import { NoteContent } from './NoteContent'
 import { IconButton, MenuList, Popover, type MenuEntry } from './ui'
 
@@ -82,6 +82,15 @@ export const NoteCard = memo(function NoteCard({ note, rowId, slot, paired, pinn
   const onPinAnimationEnd = (event: AnimationEvent<HTMLButtonElement>): void => {
     if (event.animationName === 'pin-pop') setPinPop(false)
   }
+
+  // Opening a note hides the board, which cuts a pop short; it ends there too, so it does not
+  // play again when the board comes back. (Subscribed only while the pop is running.)
+  useEffect(() => {
+    if (!pinPop) return
+    return useStore.subscribe((state) => {
+      if (state.view.mode !== 'board') setPinPop(false)
+    })
+  }, [pinPop])
 
   const move = (direction: MoveDirection): void => {
     moveNoteByKeyboard(note.id, direction)
