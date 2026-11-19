@@ -331,6 +331,17 @@ test('undo, redo, clear and the eraser; Esc asks before a drawing is thrown away
   expect(red!).toBeGreaterThan(green! + 60)
   expect(red!).toBeGreaterThan(blue! + 60)
 
+  // A tap leaves a dot as big as the pointer showed (Bold: 10 px), and a short tick shows too.
+  await page.mouse.click(700, 300)
+  expect(await inkAt(page, 700, 300)).toBeGreaterThan(200)
+  expect(await inkAt(page, 703, 300)).toBeGreaterThan(200)
+  expect(await inkAt(page, 708, 300)).toBe(0)
+  await draw(page, [
+    [700, 340],
+    [704, 343]
+  ], 2)
+  expect(await inkAt(page, 702, 341)).toBeGreaterThan(200)
+
   // Clear takes everything away, and is undone like any other step.
   await tool(page, 'Clear').click()
   expect(await inkAt(page, 400, 400)).toBe(0)
@@ -469,6 +480,131 @@ test('Ctrl+Shift+D opens the space; there Ctrl+Enter is Done, not Log note; a wi
   await ctx.quit()
 })
 
+/** True when the keyboard is somewhere inside the drawing space. */
+const keyboardInSpace = (page: Page): Promise<boolean> => page.evaluate(() => document.activeElement?.closest('[data-testid="drawing-space"]') != null)
+
+/** Colour of the top-left pixel of an attachment's original file, read back through the attachment scheme. */
+async function cornerPixel(page: Page, attachmentId: string): Promise<number[]> {
+  return page.evaluate(async (id) => {
+    const picture = new Image()
+    picture.crossOrigin = 'anonymous'
+    picture.src = `tn-attachment://file/${encodeURIComponent(id)}?v=full`
+    await picture.decode()
+    const canvas = new OffscreenCanvas(picture.naturalWidth, picture.naturalHeight)
+    const context = canvas.getContext('2d')!
+    context.drawImage(picture, 0, 0)
+    return Array.from(context.getImageData(0, 0, 1, 1).data.slice(0, 3))
+  }, attachmentId)
+}
+
+test('the keyboard never leaves the drawing space; an edited drawing keeps the colours it was drawn in', async () => {
+  const ctx = await launch({ size: SIZE })
+  const errors = await collectConsoleErrors(ctx.page)
+  const { page, app } = ctx
+  await clickEmptySpace(page)
+  await page.keyboard.type('Drawn in charcoal')
+  await openDrawingSpace(page)
+  await draw(page, [
+    [200, 400],
+    [600, 400]
+  ])
+
+  // A focused button that turns disabled (Clear, with nothing left to clear) keeps Tab inside.
+  await tool(page, 'Clear').focus()
+  await page.keyboard.press('Enter')
+  await expect(tool(page, 'Clear')).toBeDisabled()
+  for (const key of ['Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab']) {
+    await page.keyboard.press(key)
+    expect(await keyboardInSpace(page), `after ${key}`).toBe(true)
+  }
+  await page.keyboard.press('Control+z')
+  expect(await inkAt(page, 400, 400)).toBeGreaterThan(200)
+
+  // Hidden to the tray from the title bar and shown again: the drawing is still there, and
+  // from the title bar's buttons Tab goes into the drawing tools, never to the note behind
+  // or to the menu (which would open on top of the drawing).
+  await page.getByTestId('hide-window').click()
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible())).toBe(false)
+  await app.evaluate(() => (globalThis as unknown as { __tnTest: { windows: { toggle: () => void } } }).__tnTest.windows.toggle())
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible())).toBe(true)
+  await expect(space(page)).toBeVisible()
+  expect(await inkAt(page, 400, 400)).toBeGreaterThan(200)
+  for (const key of ['Tab', 'Shift+Tab']) {
+    await page.getByTestId('hide-window').focus()
+    await page.keyboard.press(key)
+    expect(await keyboardInSpace(page), `${key} from the title bar`).toBe(true)
+  }
+  // Shift+Tab from Minimize would otherwise land on the menu button.
+  await page.getByRole('button', { name: 'Minimize' }).focus()
+  await page.keyboard.press('Shift+Tab')
+  expect(await keyboardInSpace(page)).toBe(true)
+  await expect(page.getByTestId('gear')).not.toBeFocused()
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect(editorBody(page)).toHaveText('Drawn in charcoal')
+
+  await tool(page, 'Done').click()
+  await waitForImages(page, '.focus-editor .image-node img', 1)
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+  const [charcoal] = imagesIn((await storedNotes(app))[0]!.content as StoredImage)
+  expect(await cornerPixel(page, charcoal!.attrs!.attachmentId)).toEqual([37, 38, 42])
+
+  // The app moves to the light theme. The dark drawing is edited on its own dark sheet, in
+  // its own light ink (in the light theme's ink it would all but vanish), and stays dark.
+  await page.getByTestId('gear').click()
+  await page.getByRole('menuitem', { name: /^Settings/ }).click()
+  await page.getByRole('radiogroup', { name: 'Theme' }).getByRole('radio', { name: 'Paper' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'paper')
+  await page.keyboard.press('Escape')
+  await notes(page).first().locator('.prose p').first().click()
+  await waitForImages(page, '.focus-editor .image-node img', 1)
+  await images(page).first().locator('img').hover()
+  await images(page).first().getByRole('button', { name: 'Edit drawing' }).click()
+  await expect.poll(() => inkPixels(page)).toBeGreaterThan(300)
+  await expect(space(page)).toHaveAttribute('data-sheet-theme', 'charcoal')
+  expect(await space(page).evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgb(37, 38, 42)')
+  const opened = (await space(page).boundingBox())!
+  const line = await page.getByTestId('drawing-ink').evaluate((element) => {
+    // The brightest pixel of the reopened line: its own light ink, solid.
+    const canvas = element as HTMLCanvasElement
+    const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
+    let best = [0, 0, 0, 0]
+    for (let i = 0; i < data.length; i += 4) if (data[i + 3]! > 250 && data[i]! > best[0]!) best = [data[i]!, data[i + 1]!, data[i + 2]!, data[i + 3]!]
+    return best
+  })
+  expect(line[0]!).toBeGreaterThan(200)
+  // New ink is in the drawing's own colours too.
+  await draw(page, [
+    [opened.x + 200, opened.y + 700],
+    [opened.x + 600, opened.y + 700]
+  ])
+  expect((await colorAt(page, opened.x + 400, opened.y + 700))[0]!).toBeGreaterThan(200)
+  await page.keyboard.press('Control+Enter')
+  await expect(space(page)).toBeHidden()
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+  const [edited] = imagesIn((await storedNotes(app))[0]!.content as StoredImage)
+  expect(edited!.attrs!.attachmentId).not.toBe(charcoal!.attrs!.attachmentId)
+  expect(await cornerPixel(page, edited!.attrs!.attachmentId)).toEqual([37, 38, 42])
+
+  // A new drawing is made on the light sheet.
+  await clickEmptySpace(page)
+  await openDrawingSpace(page)
+  await expect(space(page)).toHaveAttribute('data-sheet-theme', 'paper')
+  await draw(page, [
+    [300, 300],
+    [500, 320]
+  ])
+  await page.keyboard.press('Control+Enter')
+  await waitForImages(page, '.focus-editor .image-node img', 1)
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+  const paper = (await storedNotes(app)).flatMap((note) => imagesIn(note.content as StoredImage)).find((image) => image.attrs!.attachmentId !== edited!.attrs!.attachmentId)!
+  expect(await cornerPixel(page, paper.attrs!.attachmentId)).toEqual([245, 243, 237])
+  expect(errors).toEqual([])
+  await ctx.quit()
+})
+
 test('the formatting bar folds away behind a small arrow, everything still works, and the choice is remembered', async () => {
   const dataDir = freshDataDir()
   let ctx = await launch({ dataDir, size: SIZE })
@@ -513,6 +649,13 @@ test('the formatting bar folds away behind a small arrow, everything still works
   await page.getByRole('button', { name: 'Show formatting' }).click()
   await expect(formatBar(page)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Hide formatting' })).toHaveAttribute('aria-expanded', 'true')
+  // A bar button that has the keyboard when the bar folds away hands it back to the text.
+  await formatBar(page).getByRole('button', { name: 'Bold' }).focus()
+  await page.getByRole('button', { name: 'Hide formatting' }).click()
+  await expect(formatBar(page)).toBeHidden()
+  await expect(editorBody(page)).toBeFocused()
+  await page.getByRole('button', { name: 'Show formatting' }).click()
+  await expect(formatBar(page)).toBeVisible()
   await page.keyboard.press('Escape')
   await ctx.quit()
 

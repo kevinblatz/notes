@@ -297,7 +297,11 @@ export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: 
           aria-label={collapsed ? 'Show formatting' : 'Hide formatting'}
           title={collapsed ? 'Show formatting' : 'Hide formatting'}
           onMouseDown={keepSelection}
-          onClick={() => void updatePreferences({ formatBarCollapsed: !collapsed })}
+          onClick={() => {
+            // A bar button that had the keyboard is about to go out of reach: back to the text.
+            if (!collapsed && document.getElementById(barId)?.contains(document.activeElement)) editor.view.focus()
+            void updatePreferences({ formatBarCollapsed: !collapsed })
+          }}
         >
           {collapsed ? <ChevronUp size={14} strokeWidth={2.25} /> : <ChevronDown size={14} strokeWidth={2.25} />}
         </button>

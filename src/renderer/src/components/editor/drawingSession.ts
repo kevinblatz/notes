@@ -26,7 +26,3 @@ export function openDrawing(target: DrawingTarget): void {
 export function closeDrawing(): void {
   useDrawingSession.setState({ target: null })
 }
-
-export function isDrawingOpen(): boolean {
-  return useDrawingSession.getState().target !== null
-}

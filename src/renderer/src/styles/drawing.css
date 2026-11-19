@@ -21,6 +21,9 @@
   visibility: hidden;
   transition: visibility 0s 200ms;
 }
+[data-motion='reduce'] .format-dock.is-collapsed .format-dock-inner {
+  transition-delay: 0s;
+}
 .format-dock .format-bar {
   transition:
     opacity 160ms var(--ease),
@@ -112,6 +115,14 @@
   from {
     opacity: 0;
   }
+}
+/* An edited drawing comes in together with its picture and its own sheet colour, not before. */
+.draw-layer.is-loading,
+.draw-layer.is-loading .draw-toolbar {
+  animation: none;
+}
+.draw-layer.is-loading {
+  opacity: 0;
 }
 
 .draw-canvas {
