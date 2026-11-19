@@ -1,0 +1,402 @@
+/**
+ * Formatting controls. They exist only while a note is being edited: a slim bar under the
+ * editor, plus a small bubble that appears beside selected text.
+ */
+import type { Editor } from '@tiptap/core'
+import { PluginKey } from '@tiptap/pm/state'
+import { useEditorState } from '@tiptap/react'
+import { BubbleMenu } from '@tiptap/react/menus'
+import {
+  Baseline,
+  Bold,
+  Brush,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Highlighter,
+  ImagePlus,
+  Italic,
+  Link as LinkIcon,
+  List,
+  ListChecks,
+  ListOrdered,
+  Redo2,
+  Strikethrough,
+  Underline,
+  Undo2,
+  Unlink
+} from 'lucide-react'
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { FONT_KEYS, FONT_LABELS, FONT_SIZES, fontVar, HIGHLIGHT_COLORS, highlightVar, INK_COLORS, inkVar, safeLinkHref } from '@shared/content'
+import { api } from '../../lib/api'
+import { overlayDepth, useEscape } from '../../lib/escape'
+import { updatePreferences } from '../../state/actions'
+import { useStore } from '../../state/store'
+import { IconButton, MenuList, Popover, type MenuEntry } from '../ui'
+import { DrawingSpace } from './DrawingSpace'
+import { closeDrawing, openDrawing, useDrawingSession } from './drawingSession'
+
+/** Opens the drawing space for the caret, from anywhere in an open note, bar shown or hidden. */
+export const DRAW_SHORTCUT = 'Ctrl+Shift+D'
+
+function isDrawShortcut(event: KeyboardEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd'
+}
+
+/** Keep the text selection when a control is pressed with the mouse. */
+const keepSelection = (event: MouseEvent): void => event.preventDefault()
+
+function useFormatState(editor: Editor) {
+  return useEditorState({
+    editor,
+    selector: ({ editor: e }) => {
+      const style = e.getAttributes('textStyle') as { color?: string | null; fontFamily?: string | null; fontSize?: string | null }
+      return {
+        bold: e.isActive('bold'),
+        italic: e.isActive('italic'),
+        underline: e.isActive('underline'),
+        strike: e.isActive('strike'),
+        bullet: e.isActive('bulletList'),
+        ordered: e.isActive('orderedList'),
+        task: e.isActive('taskList'),
+        heading: e.isActive('heading', { level: 1 }) ? 1 : e.isActive('heading', { level: 2 }) ? 2 : e.isActive('heading', { level: 3 }) ? 3 : 0,
+        link: e.isActive('link') ? String(e.getAttributes('link').href ?? '') : null,
+        color: style.color ?? null,
+        fontFamily: style.fontFamily ?? null,
+        fontSize: style.fontSize ?? null,
+        highlight: e.isActive('highlight') ? String(e.getAttributes('highlight').color ?? highlightVar('amber')) : null,
+        canUndo: e.can().undo(),
+        canRedo: e.can().redo()
+      }
+    }
+  })
+}
+
+function Swatches({ kind, current, onPick }: { kind: 'ink' | 'highlight'; current: string | null; onPick: (value: string | null) => void }) {
+  const values = kind === 'ink' ? INK_COLORS.map((name) => ({ name, value: inkVar(name) })) : HIGHLIGHT_COLORS.map((name) => ({ name, value: highlightVar(name) }))
+  return (
+    <div className="swatches" role="group" aria-label={kind === 'ink' ? 'Text color' : 'Highlight color'}>
+      <button type="button" className={`swatch swatch-none${current === null ? ' is-current' : ''}`} onMouseDown={keepSelection} onClick={() => onPick(null)} aria-label={kind === 'ink' ? 'Default text color' : 'No highlight'} title={kind === 'ink' ? 'Default' : 'None'} />
+      {values.map(({ name, value }) => (
+        <button
+          key={name}
+          type="button"
+          className={`swatch swatch-${kind}${current === value ? ' is-current' : ''}`}
+          style={{ ['--swatch' as string]: value }}
+          onMouseDown={keepSelection}
+          onClick={() => onPick(value)}
+          aria-label={name}
+          title={name[0]!.toUpperCase() + name.slice(1)}
+        />
+      ))}
+    </div>
+  )
+}
+
+function applyLink(editor: Editor, raw: string): boolean {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    editor.chain().focus().extendMarkRange('link').unsetLink().run()
+    return true
+  }
+  const href = safeLinkHref(/^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`)
+  if (!href) return false
+  const { empty } = editor.state.selection
+  if (empty && !editor.isActive('link')) {
+    // No selection: insert the address itself as the link text.
+    editor.chain().focus().insertContent({ type: 'text', text: trimmed, marks: [{ type: 'link', attrs: { href } }] }).run()
+  } else {
+    editor.chain().focus().extendMarkRange('link').setLink({ href }).run()
+  }
+  return true
+}
+
+function LinkForm({ editor, current, onDone }: { editor: Editor; current: string | null; onDone: () => void }) {
+  const [value, setValue] = useState(current ?? '')
+  const [invalid, setInvalid] = useState(false)
+  const submit = (): void => {
+    if (applyLink(editor, value)) onDone()
+    else setInvalid(true)
+  }
+  return (
+    <form
+      className="link-form"
+      onSubmit={(event) => {
+        event.preventDefault()
+        submit()
+      }}
+    >
+      <input
+        data-autofocus
+        type="text"
+        value={value}
+        placeholder="https://"
+        aria-label="Link address"
+        aria-invalid={invalid}
+        spellCheck={false}
+        onChange={(event) => {
+          setValue(event.target.value)
+          setInvalid(false)
+        }}
+      />
+      <button type="submit" className="small-button">
+        {current ? 'Update' : 'Add link'}
+      </button>
+      {current ? (
+        <>
+          <IconButton label="Open link in browser" onClick={() => void api.openExternal(current)}>
+            <ExternalLink size={15} />
+          </IconButton>
+          <IconButton
+            label="Remove link"
+            onClick={() => {
+              applyLink(editor, '')
+              onDone()
+            }}
+          >
+            <Unlink size={15} />
+          </IconButton>
+        </>
+      ) : null}
+      {invalid ? <p className="form-error">Enter a web address starting with http:// or https://</p> : null}
+    </form>
+  )
+}
+
+function Dropdown({ label, text, entries, width }: { label: string; text: ReactNode; entries: MenuEntry[]; width?: number }) {
+  const [open, setOpen] = useState(false)
+  const anchor = useRef<HTMLButtonElement>(null)
+  return (
+    <>
+      <button ref={anchor} type="button" className="bar-dropdown" style={width ? { minWidth: width } : undefined} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onMouseDown={keepSelection} onClick={() => setOpen((v) => !v)}>
+        <span>{text}</span>
+        <ChevronDown size={13} />
+      </button>
+      <Popover anchor={anchor.current} open={open} onClose={() => setOpen(false)} placement="top" role="menu" label={label}>
+        <MenuList entries={entries} onDone={() => setOpen(false)} />
+      </Popover>
+    </>
+  )
+}
+
+function ColorControl({ editor, kind, current }: { editor: Editor; kind: 'ink' | 'highlight'; current: string | null }) {
+  const [open, setOpen] = useState(false)
+  const anchor = useRef<HTMLButtonElement>(null)
+  const pick = (value: string | null): void => {
+    const chain = editor.chain().focus()
+    if (kind === 'ink') (value ? chain.setColor(value) : chain.unsetColor()).run()
+    else (value ? chain.setHighlight({ color: value }) : chain.unsetHighlight()).run()
+    setOpen(false)
+  }
+  return (
+    <>
+      <IconButton ref={anchor} label={kind === 'ink' ? 'Text color' : 'Highlight'} active={current !== null} aria-haspopup="dialog" aria-expanded={open} onMouseDown={keepSelection} onClick={() => setOpen((v) => !v)}>
+        {kind === 'ink' ? <Baseline size={16} style={current ? { color: current } : undefined} /> : <Highlighter size={16} />}
+        {kind === 'highlight' && current ? <span className="color-dot" style={{ background: current }} /> : null}
+      </IconButton>
+      <Popover anchor={anchor.current} open={open} onClose={() => setOpen(false)} placement="top" align="center" keepFocus label={kind === 'ink' ? 'Text color' : 'Highlight color'}>
+        <Swatches kind={kind} current={current} onPick={pick} />
+      </Popover>
+    </>
+  )
+}
+
+export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: () => void }) {
+  const state = useFormatState(editor)
+  const [linkOpen, setLinkOpen] = useState(false)
+  const linkAnchor = useRef<HTMLButtonElement>(null)
+  const collapsed = useStore((s) => s.prefs.formatBarCollapsed)
+  const drawing = useDrawingSession((s) => s.target)
+  const barId = useId()
+
+  // Ctrl+Shift+D works wherever the keyboard is in the note (text, title, a caption), and
+  // also while the bar is folded away. Like Ctrl+Enter, it leaves an open menu alone.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.isComposing || !isDrawShortcut(event)) return
+      event.preventDefault()
+      if (overlayDepth() > 1) return
+      openDrawing({ kind: 'new' })
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      // The drawing space belongs to this note; it never outlives it.
+      closeDrawing()
+    }
+  }, [])
+  const run = (fn: (chain: ReturnType<Editor['chain']>) => ReturnType<Editor['chain']>) => (): void => {
+    fn(editor.chain().focus()).run()
+    // Return the keyboard to the text right away (the command above does it a frame later),
+    // so typing or Ctrl+Enter immediately after choosing from a menu is not lost.
+    editor.view.focus()
+  }
+
+  const styleEntries: MenuEntry[] = [
+    { label: 'Text', checked: state.heading === 0, onSelect: run((c) => c.setParagraph()) },
+    { label: 'Heading 1', checked: state.heading === 1, onSelect: run((c) => c.setHeading({ level: 1 })) },
+    { label: 'Heading 2', checked: state.heading === 2, onSelect: run((c) => c.setHeading({ level: 2 })) },
+    { label: 'Heading 3', checked: state.heading === 3, onSelect: run((c) => c.setHeading({ level: 3 })) }
+  ]
+  const fontEntries: MenuEntry[] = [
+    { label: 'Default font', checked: state.fontFamily === null, onSelect: run((c) => c.unsetFontFamily()) },
+    ...FONT_KEYS.map((key) => ({ label: FONT_LABELS[key], checked: state.fontFamily === fontVar(key), onSelect: run((c) => c.setFontFamily(fontVar(key))) }))
+  ]
+  const sizeEntries: MenuEntry[] = [
+    { label: 'Default size', checked: state.fontSize === null, onSelect: run((c) => c.unsetFontSize()) },
+    ...FONT_SIZES.map((size) => ({ label: `${size}`, checked: state.fontSize === `${size}px`, onSelect: run((c) => c.setFontSize(`${size}px`)) }))
+  ]
+  const fontLabel = FONT_KEYS.find((key) => state.fontFamily === fontVar(key))
+  const headingLabel = state.heading === 0 ? 'Text' : `Heading ${state.heading}`
+
+  return (
+    <>
+      <div className={`format-dock${collapsed ? ' is-collapsed' : ''}`} data-testid="format-dock">
+        {/* Folded away: out of sight, out of the Tab order, and the note gets the room. */}
+        <div className="format-dock-inner" inert={collapsed}>
+          <div id={barId} className="format-bar" role="toolbar" aria-label="Formatting">
+            <div className="bar-group">
+              <Dropdown label="Paragraph style" text={headingLabel} entries={styleEntries} width={92} />
+              <Dropdown label="Font" text={fontLabel ? FONT_LABELS[fontLabel] : 'Font'} entries={fontEntries} width={76} />
+              <Dropdown label="Text size" text={state.fontSize ? state.fontSize.replace('px', '') : 'Size'} entries={sizeEntries} width={56} />
+              <IconButton label="Draw" hint={DRAW_SHORTCUT} aria-keyshortcuts="Control+Shift+D" onMouseDown={keepSelection} onClick={() => openDrawing({ kind: 'new' })}>
+                <Brush size={16} />
+              </IconButton>
+            </div>
+            <div className="bar-group">
+              <IconButton label="Bold" hint="Ctrl+B" active={state.bold} onMouseDown={keepSelection} onClick={run((c) => c.toggleBold())}><Bold size={16} /></IconButton>
+              <IconButton label="Italic" hint="Ctrl+I" active={state.italic} onMouseDown={keepSelection} onClick={run((c) => c.toggleItalic())}><Italic size={16} /></IconButton>
+              <IconButton label="Underline" hint="Ctrl+U" active={state.underline} onMouseDown={keepSelection} onClick={run((c) => c.toggleUnderline())}><Underline size={16} /></IconButton>
+              <IconButton label="Strikethrough" hint="Ctrl+Shift+S" active={state.strike} onMouseDown={keepSelection} onClick={run((c) => c.toggleStrike())}><Strikethrough size={16} /></IconButton>
+              <ColorControl editor={editor} kind="ink" current={state.color} />
+              <ColorControl editor={editor} kind="highlight" current={state.highlight} />
+            </div>
+            <div className="bar-group">
+              <IconButton label="Bulleted list" active={state.bullet} onMouseDown={keepSelection} onClick={run((c) => c.toggleBulletList())}><List size={16} /></IconButton>
+              <IconButton label="Numbered list" active={state.ordered} onMouseDown={keepSelection} onClick={run((c) => c.toggleOrderedList())}><ListOrdered size={16} /></IconButton>
+              <IconButton label="Checklist" active={state.task} onMouseDown={keepSelection} onClick={run((c) => c.toggleTaskList())}><ListChecks size={16} /></IconButton>
+            </div>
+            <div className="bar-group">
+              <IconButton ref={linkAnchor} label="Link" active={state.link !== null} aria-haspopup="dialog" aria-expanded={linkOpen} onMouseDown={keepSelection} onClick={() => setLinkOpen((v) => !v)}><LinkIcon size={16} /></IconButton>
+              <Popover anchor={linkAnchor.current} open={linkOpen} onClose={() => setLinkOpen(false)} placement="top" align="center" label="Link">
+                <LinkForm editor={editor} current={state.link} onDone={() => setLinkOpen(false)} />
+              </Popover>
+              <IconButton label="Add image" onMouseDown={keepSelection} onClick={onAddImage}><ImagePlus size={16} /></IconButton>
+            </div>
+            <div className="bar-group">
+              <IconButton label="Undo" hint="Ctrl+Z" disabled={!state.canUndo} onMouseDown={keepSelection} onClick={run((c) => c.undo())}><Undo2 size={16} /></IconButton>
+              <IconButton label="Redo" hint="Ctrl+Y" disabled={!state.canRedo} onMouseDown={keepSelection} onClick={run((c) => c.redo())}><Redo2 size={16} /></IconButton>
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="format-fold"
+          aria-controls={barId}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Show formatting' : 'Hide formatting'}
+          title={collapsed ? 'Show formatting' : 'Hide formatting'}
+          onMouseDown={keepSelection}
+          onClick={() => {
+            // A bar button that had the keyboard is about to go out of reach: back to the text.
+            if (!collapsed && document.getElementById(barId)?.contains(document.activeElement)) editor.view.focus()
+            void updatePreferences({ formatBarCollapsed: !collapsed })
+          }}
+        >
+          {collapsed ? <ChevronUp size={14} strokeWidth={2.25} /> : <ChevronDown size={14} strokeWidth={2.25} />}
+        </button>
+      </div>
+      {drawing ? <DrawingSpace editor={editor} target={drawing} /> : null}
+    </>
+  )
+}
+
+/** Controls that appear beside selected text. */
+/**
+ * Options for Tiptap's BubbleMenu. They must keep the same identity from render to render:
+ * BubbleMenu answers every new options object or shouldShow function with an editor
+ * transaction, and a transaction re-renders this component.
+ */
+const BUBBLE_OPTIONS = { placement: 'top', offset: 8, flip: true, shift: { padding: 8 } } as const
+const showBubble = ({ editor: e, state: s }: { editor: Editor; state: Editor['state'] }): boolean => {
+  if (!e.isEditable || s.selection.empty) return false
+  // Not for a selected image block; that has its own controls.
+  return !('node' in s.selection)
+}
+
+export function SelectionBubble({ editor }: { editor: Editor }) {
+  const state = useFormatState(editor)
+  const [row, setRow] = useState<'ink' | 'highlight' | 'link' | null>(null)
+  // Read by the editor listeners below, which run on every transaction: they only ask React
+  // for an update when a row is actually open.
+  const rowOpen = useRef(false)
+  rowOpen.current = row !== null
+  const bubble = useRef<HTMLDivElement>(null)
+  // Our own key, so the bar can be told to hide (see the blur handler below).
+  const [bubbleKey] = useState(() => new PluginKey('selectionBubble'))
+  // The row belongs to the selection bar. When the bar goes away (the selection is gone, or
+  // the keyboard left the note) the row goes with it, together with its claim on Esc below.
+  useEffect(() => {
+    const onTransaction = (): void => {
+      if (!rowOpen.current) return
+      const { selection } = editor.state
+      if (selection.empty || 'node' in selection) setRow(null)
+    }
+    const onBlur = ({ event }: { event: FocusEvent }): void => {
+      const next = event.relatedTarget
+      if (next instanceof Node && bubble.current?.contains(next)) return
+      // The whole window lost the keyboard (the chart was clicked): leave everything as it
+      // was, so coming back finds the open row exactly where it was left.
+      if (!document.hasFocus()) return
+      if (rowOpen.current) setRow(null)
+      // The keyboard moved elsewhere in this window (the title, a caption, the drawing
+      // space): the bar goes too. Tiptap's bar skips hiding on the first blur after any press
+      // inside it, which left it floating over the text once one of its buttons was used.
+      queueMicrotask(() => {
+        if (!editor.isDestroyed && !editor.isFocused) editor.view.dispatch(editor.state.tr.setMeta(bubbleKey, 'hide'))
+      })
+    }
+    editor.on('transaction', onTransaction)
+    editor.on('blur', onBlur)
+    return () => {
+      editor.off('transaction', onTransaction)
+      editor.off('blur', onBlur)
+    }
+  }, [editor, bubbleKey])
+  // Esc closes the open colour or link row first, not the note behind it.
+  useEscape(row !== null, () => {
+    setRow(null)
+    editor.view.focus()
+  })
+  const toggle = (next: 'ink' | 'highlight' | 'link') => (): void => setRow((current) => (current === next ? null : next))
+  const run = (fn: (chain: ReturnType<Editor['chain']>) => ReturnType<Editor['chain']>) => (): void => {
+    fn(editor.chain().focus()).run()
+    // Return the keyboard to the text right away (the command above does it a frame later),
+    // so typing or Ctrl+Enter immediately after choosing from a menu is not lost.
+    editor.view.focus()
+  }
+  return (
+    <BubbleMenu
+      editor={editor}
+      pluginKey={bubbleKey}
+      options={BUBBLE_OPTIONS}
+      shouldShow={showBubble}
+    >
+      <div ref={bubble} className="bubble" role="toolbar" aria-label="Selection formatting">
+        <div className="bubble-row">
+          <IconButton label="Bold" active={state.bold} onMouseDown={keepSelection} onClick={run((c) => c.toggleBold())}><Bold size={15} /></IconButton>
+          <IconButton label="Italic" active={state.italic} onMouseDown={keepSelection} onClick={run((c) => c.toggleItalic())}><Italic size={15} /></IconButton>
+          <IconButton label="Underline" active={state.underline} onMouseDown={keepSelection} onClick={run((c) => c.toggleUnderline())}><Underline size={15} /></IconButton>
+          <IconButton label="Strikethrough" active={state.strike} onMouseDown={keepSelection} onClick={run((c) => c.toggleStrike())}><Strikethrough size={15} /></IconButton>
+          <span className="bubble-divider" />
+          <IconButton label="Text color" active={row === 'ink' || state.color !== null} onMouseDown={keepSelection} onClick={toggle('ink')}><Baseline size={15} style={state.color ? { color: state.color } : undefined} /></IconButton>
+          <IconButton label="Highlight" active={row === 'highlight' || state.highlight !== null} onMouseDown={keepSelection} onClick={toggle('highlight')}><Highlighter size={15} /></IconButton>
+          <IconButton label="Link" active={row === 'link' || state.link !== null} onMouseDown={keepSelection} onClick={toggle('link')}><LinkIcon size={15} /></IconButton>
+        </div>
+        {row === 'ink' ? <Swatches kind="ink" current={state.color} onPick={(value) => { (value ? editor.chain().focus().setColor(value) : editor.chain().focus().unsetColor()).run(); setRow(null) }} /> : null}
+        {row === 'highlight' ? <Swatches kind="highlight" current={state.highlight} onPick={(value) => { (value ? editor.chain().focus().setHighlight({ color: value }) : editor.chain().focus().unsetHighlight()).run(); setRow(null) }} /> : null}
+        {row === 'link' ? <LinkForm editor={editor} current={state.link} onDone={() => setRow(null)} /> : null}
+      </div>
+    </BubbleMenu>
+  )
+}

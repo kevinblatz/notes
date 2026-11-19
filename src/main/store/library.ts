@@ -1,0 +1,201 @@
+/**
+ * The note library: one object that owns the database and the attachment folder and exposes
+ * the operations the app performs. No Electron imports, so it runs unchanged under the
+ * unit tests and could later back a different shell.
+ */
+import { join } from 'node:path'
+import { countImages, noteLabel, truncate } from '@shared/content'
+import { loadPreferences, mergePreferences } from '@shared/preferences'
+import type {
+  AttachmentMeta,
+  BoardLayout,
+  CreateNoteInput,
+  CreateNoteResult,
+  LayoutResult,
+  Note,
+  Preferences,
+  RestoreResult,
+  SaveNoteInput,
+  SaveNoteResult,
+  TrashEntry
+} from '@shared/types'
+import type { SavedWindowState } from '@shared/windowBounds'
+import { AttachmentStore, type StoreImageInput } from './attachments'
+import { NotesDb, toAttachmentMeta, type AttachmentRow, type DbOptions } from './db'
+
+/** How long an image may stay unused by any note before startup housekeeping deletes it. */
+export const ORPHAN_GRACE_MS = 14 * 24 * 60 * 60 * 1000
+
+export interface StoredSession {
+  openNoteId: string | null
+  cleanExit: boolean
+}
+
+export class Library {
+  readonly db: NotesDb
+  readonly attachments: AttachmentStore
+
+  constructor(
+    public readonly dataDir: string,
+    options: DbOptions = {}
+  ) {
+    this.db = new NotesDb(join(dataDir, 'notes.db'), { backupDir: join(dataDir, 'backups'), ...options })
+    this.attachments = new AttachmentStore(join(dataDir, 'attachments'))
+  }
+
+  get backupDir(): string {
+    return join(this.dataDir, 'backups')
+  }
+
+  close(): void {
+    this.db.close()
+  }
+
+  // ---- notes
+
+  listLive(): Note[] {
+    return this.db.listLive()
+  }
+
+  layoutState(): LayoutResult {
+    return { layout: this.db.getLayout(), pins: this.db.getPins(), trashCount: this.db.countTrash() }
+  }
+
+  createNote(input: CreateNoteInput): CreateNoteResult {
+    return this.db.createNote(input)
+  }
+
+  saveNote(input: SaveNoteInput): SaveNoteResult {
+    return this.db.saveNote(input)
+  }
+
+  discardEmptyNote(id: string): LayoutResult & { discarded: boolean } {
+    const discarded = this.db.discardEmptyNote(id)
+    return { discarded, ...this.layoutState() }
+  }
+
+  trashNote(id: string): LayoutResult {
+    this.db.trashNote(id)
+    return this.layoutState()
+  }
+
+  restoreNote(id: string): RestoreResult | null {
+    const note = this.db.restoreNote(id)
+    return note ? { note, ...this.layoutState() } : null
+  }
+
+  listTrash(): TrashEntry[] {
+    return this.db.listTrash().map((note) => ({
+      id: note.id,
+      label: noteLabel(note),
+      snippet: truncate(note.plainText.replace(/\s+/g, ' ').trim(), 160),
+      imageCount: countImages(note.content),
+      deletedAt: note.deletedAt ?? 0
+    }))
+  }
+
+  /** Delete trashed notes for good, together with image files nothing else uses. */
+  purge(ids: string[] | 'all'): LayoutResult {
+    for (const orphan of this.db.purgeNotes(ids)) this.attachments.remove(orphan)
+    return this.layoutState()
+  }
+
+  saveLayout(layout: unknown): BoardLayout {
+    return this.db.saveLayout(layout)
+  }
+
+  setPins(ids: unknown): string[] {
+    return this.db.setPins(ids)
+  }
+
+  // ---- attachments
+
+  importImage(input: StoreImageInput): AttachmentMeta {
+    const row = this.attachments.store(input)
+    try {
+      this.db.insertAttachment(row)
+    } catch (error) {
+      this.attachments.remove(row)
+      throw error
+    }
+    return toAttachmentMeta(row)
+  }
+
+  getAttachment(id: string): AttachmentRow | null {
+    return this.db.getAttachment(id)
+  }
+
+  /**
+   * Startup housekeeping: remove half-written temp files, and images that no note has
+   * referred to for a while. An image is not removed the first time it is seen unused: it
+   * may have been cut to the clipboard to be pasted into another note, possibly after a
+   * restart. It is removed only once it has stayed unused for the whole grace period.
+   */
+  collectGarbage(now: number = Date.now(), graceMs: number = ORPHAN_GRACE_MS): { removed: number; waiting: number } {
+    this.attachments.sweepTempFiles()
+    const stored = this.db.getSetting<Record<string, unknown>>('orphanedAttachments')
+    const since: Record<string, unknown> = stored && typeof stored === 'object' ? stored : {}
+    const stillWaiting: Record<string, number> = {}
+    let removed = 0
+    for (const orphan of this.db.unreferencedAttachments()) {
+      const first = since[orphan.id]
+      const firstSeen = typeof first === 'number' && Number.isFinite(first) ? first : now
+      if (now - firstSeen >= graceMs) {
+        this.db.deleteAttachment(orphan.id)
+        this.attachments.remove(orphan)
+        removed++
+      } else {
+        stillWaiting[orphan.id] = firstSeen
+      }
+    }
+    this.db.setSetting('orphanedAttachments', stillWaiting)
+    return { removed, waiting: Object.keys(stillWaiting).length }
+  }
+
+  // ---- settings
+
+  getPreferences(): Preferences {
+    return loadPreferences(this.db.getSetting('preferences'))
+  }
+
+  setPreferences(patch: unknown): Preferences {
+    const next = mergePreferences(this.getPreferences(), patch)
+    this.db.setSetting('preferences', next)
+    return next
+  }
+
+  getWindowState(): SavedWindowState | null {
+    const value = this.db.getSetting<SavedWindowState>('window')
+    if (!value || typeof value !== 'object') return null
+    if (value.dock !== 'left' && value.dock !== 'right' && value.dock !== 'custom') return null
+    return {
+      dock: value.dock,
+      bounds: isRect(value.bounds) ? value.bounds : null,
+      displayId: typeof value.displayId === 'number' ? value.displayId : null,
+      displayBounds: isRect(value.displayBounds) ? value.displayBounds : null
+    }
+  }
+
+  setWindowState(state: SavedWindowState): void {
+    this.db.setSetting('window', state)
+  }
+
+  getSession(): StoredSession {
+    const value = this.db.getSetting<Partial<StoredSession>>('session')
+    return {
+      openNoteId: typeof value?.openNoteId === 'string' ? value.openNoteId : null,
+      // A missing record means first launch, which is not an unclean exit.
+      cleanExit: value?.cleanExit !== false
+    }
+  }
+
+  setSession(patch: Partial<StoredSession>): void {
+    this.db.setSetting('session', { ...this.getSession(), ...patch })
+  }
+}
+
+function isRect(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  if (typeof value !== 'object' || value === null) return false
+  const r = value as Record<string, unknown>
+  return [r.x, r.y, r.width, r.height].every((n) => typeof n === 'number' && Number.isFinite(n))
+}
