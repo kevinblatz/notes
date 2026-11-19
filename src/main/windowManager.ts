@@ -74,7 +74,7 @@ export interface OpacityState {
   requested: number
   /** The value last given to the window (during a fade, a step on the way). */
   applied: number
-  /** What the window reports. Only Windows and macOS can change it; elsewhere it stays 1. */
+  /** What the window reports. Windows and macOS (and some Linux desktops) apply it; elsewhere it stays 1. */
   native: number
   /** The opacity the window was given when it was created, before it was first shown. */
   initial: number
@@ -552,7 +552,10 @@ export class WindowManager {
         if (!this.pointerOnFrame) this.reportPointer('frame', true)
       })
       win.hookWindowMessage(WM_NCMOUSELEAVE, () => {
-        if (this.pointerOnFrame) this.reportPointer('frame', false)
+        // Leaving the window through its frame (over the top edge from the drag strip, say)
+        // may not reach the page as a leave of its own, so where the pointer really is decides.
+        if (!this.cursorOverWindow()) this.pointerOnPage = false
+        this.reportPointer('frame', false)
       })
     }
   }
@@ -652,6 +655,14 @@ export class WindowManager {
     const continuing = this.opacityPreview !== null && next !== null
     this.opacityPreview = next
     this.updateOpacity({ instant: continuing })
+  }
+
+  private cursorOverWindow(): boolean {
+    const win = this.window
+    if (!win) return false
+    const point = screen.getCursorScreenPoint()
+    const bounds = win.getBounds()
+    return point.x >= bounds.x && point.x < bounds.x + bounds.width && point.y >= bounds.y && point.y < bounds.y + bounds.height
   }
 
   private clearLeaveTimer(): void {
