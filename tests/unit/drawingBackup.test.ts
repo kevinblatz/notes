@@ -47,5 +47,8 @@ describe('a drawing in a note', () => {
     const restored = target.listLive()[0]!
     expect(restored.content).toEqual(drawingNote(image.id))
     expect(readFileSync(target.attachments.originalPath(target.getAttachment(image.id)!)).equals(DRAWING)).toBe(true)
+    // Close both libraries before their folders are removed: Windows cannot delete an open database.
+    source.close()
+    target.close()
   })
 })
