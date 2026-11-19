@@ -21,10 +21,12 @@ import {
 import { DEFAULT_PREFERENCES } from '@shared/types'
 
 describe('window opacity preferences', () => {
-  it('default to a solid window that turns solid while in use', () => {
+  it('default to a solid window, and a chosen opacity that stays while the notes are in use', () => {
     expect(DEFAULT_PREFERENCES.windowOpacity).toBe(1)
-    expect(DEFAULT_PREFERENCES.opacitySolidOnHover).toBe(true)
-    expect(loadPreferences(undefined)).toMatchObject({ windowOpacity: 1, opacitySolidOnHover: true })
+    // Off by default: notes taken over something must stay see-through while they are written.
+    expect(DEFAULT_PREFERENCES.opacitySolidOnHover).toBe(false)
+    expect(loadPreferences(undefined)).toMatchObject({ windowOpacity: 1, opacitySolidOnHover: false })
+    expect(windowOpacityTarget({ chosen: 0.7, solidOnHover: DEFAULT_PREFERENCES.opacitySolidOnHover, pointerInside: true, focused: true, preview: null })).toBe(0.7)
   })
 
   it('accept any opacity from the minimum to solid, in whole percent', () => {
@@ -52,6 +54,7 @@ describe('window opacity preferences', () => {
   })
 
   it('take only a real boolean for "solid while I use it"', () => {
+    expect(mergePreferences(DEFAULT_PREFERENCES, { opacitySolidOnHover: true }).opacitySolidOnHover).toBe(true)
     expect(mergePreferences(DEFAULT_PREFERENCES, { opacitySolidOnHover: false }).opacitySolidOnHover).toBe(false)
     const off = { ...DEFAULT_PREFERENCES, opacitySolidOnHover: false }
     expect(mergePreferences(off, { opacitySolidOnHover: true }).opacitySolidOnHover).toBe(true)
@@ -63,7 +66,7 @@ describe('window opacity preferences', () => {
   it('survive a damaged settings row', () => {
     const loaded = loadPreferences({ windowOpacity: 'see-through', opacitySolidOnHover: 'yes', theme: 'neon' })
     expect(loaded.windowOpacity).toBe(1)
-    expect(loaded.opacitySolidOnHover).toBe(true)
+    expect(loaded.opacitySolidOnHover).toBe(false)
     expect(loaded.theme).toBe('charcoal')
     expect(loadPreferences('not an object')).toEqual(DEFAULT_PREFERENCES)
     expect(loadPreferences({ windowOpacity: 0.05 }).windowOpacity).toBe(0.3)

@@ -95,12 +95,16 @@ export function registerIpc(context: IpcContext): void {
     schemaVersion: SCHEMA_VERSION
   })
 
+  /** True only for the app's own top-level page in the notes window. */
+  const fromApp = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => {
+    const frame = event.senderFrame
+    return !!frame && frame === event.sender.mainFrame && event.sender === windows.window?.webContents && windows.isTrustedFrameUrl(frame.url)
+  }
+
   /** Register a handler that refuses calls from anything but the app's own top-level page. */
   const handle = <T>(channel: string, fn: (payload: unknown, event: IpcMainInvokeEvent) => T | Promise<T>): void => {
     ipcMain.handle(channel, async (event, payload: unknown) => {
-      const frame = event.senderFrame
-      const trusted = !!frame && frame === event.sender.mainFrame && event.sender === windows.window?.webContents && windows.isTrustedFrameUrl(frame.url)
-      if (!trusted) throw new Error('Request refused.')
+      if (!fromApp(event)) throw new Error('Request refused.')
       return fn(payload, event)
     })
   }
@@ -328,12 +332,6 @@ export function registerIpc(context: IpcContext): void {
     if (event.sender !== windows.window?.webContents || typeof unsaved !== 'boolean') return
     context.setUnsaved(unsaved)
   })
-
-  /** Messages without a reply are held to the same rule: only the app's own top-level page. */
-  const fromApp = (event: IpcMainEvent): boolean => {
-    const frame = event.senderFrame
-    return !!frame && frame === event.sender.mainFrame && event.sender === windows.window?.webContents && windows.isTrustedFrameUrl(frame.url)
-  }
 
   // "Solid while I use it": the page says when the pointer comes onto it and leaves it.
   ipcMain.on(IPC.pointer, (event, inside: unknown) => {

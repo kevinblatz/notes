@@ -18,7 +18,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { TitleBar } from './components/TitleBar'
 import { Toasts } from './components/Toasts'
 import { TrashPanel } from './components/TrashPanel'
-import { flushAll, initialize, openPanel, startDraft, stepWindowOpacity, trackPointerForOpacity, undoLast } from './state/actions'
+import { flushAll, followStoredOpacity, initialize, openPanel, startDraft, stepWindowOpacity, trackPointerForOpacity, undoLast } from './state/actions'
 import { setState, useStore } from './state/store'
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -48,7 +48,9 @@ export function App() {
       api.on('window-status', (status) => setState({ windowStatus: status })),
       api.on('preferences-changed', (next) => setState({ prefs: next })),
       // "Solid while I use it" needs to know when the pointer is over the notes.
-      trackPointerForOpacity()
+      trackPointerForOpacity(),
+      // An opacity chosen in the tray while the opacity control is open reaches the window too.
+      followStoredOpacity()
     ]
     return () => unsubscribe.forEach((off) => off())
   }, [])

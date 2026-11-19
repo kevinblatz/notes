@@ -193,13 +193,11 @@ test('the title bar control: keyboard and mouse on the slider, presets, live pre
   await expect.poll(() => requested(app)).toBe(0.7)
   await expectNative(app, 0.7)
 
-  // "Solid while I use it" is in the popover too.
+  // "Solid while I use it" is in the popover too. It is off until the user turns it on.
   const solid = popover(page).getByRole('switch', { name: 'Solid while I use it' })
-  await expect(solid).toHaveAttribute('aria-checked', 'true')
-  await solid.click()
   await expect(solid).toHaveAttribute('aria-checked', 'false')
-  await expect.poll(() => storedSolid(app)).toBe(false)
   await solid.click()
+  await expect(solid).toHaveAttribute('aria-checked', 'true')
   await expect.poll(() => storedSolid(app)).toBe(true)
 
   // Esc closes it and gives the keyboard back to the button. The preview lasts a moment more,
@@ -214,6 +212,8 @@ test('the title bar control: keyboard and mouse on the slider, presets, live pre
 
 test('the wheel over the icon and the keyboard shortcut step by 5 % with a small readout', async () => {
   const { app, page } = await start()
+  // With "solid while I use it" on, the value being changed still shows as it is.
+  await setPrefs(page, { opacitySolidOnHover: true })
   await countOpacityWrites(app)
   await button(page).hover()
   await page.mouse.wheel(0, 100)
@@ -257,6 +257,34 @@ test('the wheel over the icon and the keyboard shortcut step by 5 % with a small
   await expect.poll(() => stored(app)).toBe(0.8)
 })
 
+test('the small readout stays under menus and panels', async () => {
+  const { page } = await start({ size: { width: 680, height: 1032 } })
+  const flash = page.getByTestId('opacity-flash')
+  // Settings covers the title bar: the readout must not float on top of it.
+  await page.keyboard.press('Control+,')
+  await expect(page.getByTestId('settings')).toBeVisible()
+  await page.keyboard.press('Control+Shift+Minus')
+  await expect(flash).toHaveText('95%')
+  const covered = await flash.evaluate((element) => {
+    // elementFromPoint skips elements the pointer passes through, so let it find this one.
+    ;(element as HTMLElement).style.pointerEvents = 'auto'
+    const box = element.getBoundingClientRect()
+    const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+    ;(element as HTMLElement).style.pointerEvents = ''
+    return top !== null && !element.contains(top)
+  })
+  expect(covered, 'the readout is under the Settings sheet').toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings')).toBeHidden()
+  // The gear menu opens right under the icon: the readout makes way for it.
+  await button(page).hover()
+  await page.mouse.wheel(0, 100)
+  await expect(flash).toHaveText('90%')
+  await page.getByTestId('gear').click()
+  await expect(page.getByRole('menu', { name: 'Menu' })).toBeVisible()
+  await expect(flash).toBeHidden()
+})
+
 test('Settings has the same slider and switch', async () => {
   const { app, page } = await start()
   await page.keyboard.press('Control+,')
@@ -280,15 +308,44 @@ test('Settings has the same slider and switch', async () => {
   await expect.poll(() => stored(app)).toBe(0.3)
 
   const solid = settings.getByRole('switch', { name: 'Solid while I use it' })
-  await expect(solid).toHaveAttribute('aria-checked', 'true')
-  await solid.click()
-  await expect.poll(() => storedSolid(app)).toBe(false)
-  // With it off the chosen opacity stays while the notes are in use.
-  await expect.poll(() => requested(app), { timeout: 4000 }).toBe(0.3)
+  await expect(solid).toHaveAttribute('aria-checked', 'false')
+  // With it off (the default) the chosen opacity stays while the notes are in use.
+  await expect.poll(async () => (await opacity(app)).preview, { timeout: 4000 }).toBe(null)
+  expect(await requested(app)).toBe(0.3)
   expect((await opacity(app)).pointerInside || (await opacity(app)).focused).toBe(true)
   await expectNative(app, 0.3)
+  // Switched on, the notes turn solid while they are in use.
+  await solid.click()
+  await expect.poll(() => storedSolid(app)).toBe(true)
+  await expect.poll(() => requested(app), { timeout: 4000 }).toBe(1)
+  await solid.click()
+  await expect.poll(() => storedSolid(app)).toBe(false)
+  await expect.poll(() => requested(app)).toBe(0.3)
   await page.keyboard.press('Escape')
   await expect(settings).toBeHidden()
+})
+
+test('by default the notes stay see-through while you write in them', async () => {
+  const { app, page } = await start()
+  expect(await storedSolid(app)).toBe(false)
+  await button(page).click()
+  await popover(page).getByRole('group', { name: 'Quick choices' }).getByRole('button', { name: '70%' }).click()
+  await page.keyboard.press('Escape')
+  await expect(popover(page)).toBeHidden()
+  await expect.poll(async () => (await opacity(app)).preview, { timeout: 4000 }).toBe(null)
+  // Taking notes over something: the pointer is on the notes and the keyboard is in them.
+  await clickEmptySpace(page)
+  await expect(focusView(page)).toBeVisible()
+  await page.keyboard.type('Taking notes on the webinar')
+  await windowEvent(app, 'focus')
+  await pointer(page, true)
+  await page.waitForTimeout(300)
+  const state = await opacity(app)
+  expect(state.pointerInside).toBe(true)
+  expect(state.focused).toBe(true)
+  expect(state.requested).toBe(0.7)
+  await expectNative(app, 0.7)
+  await expect(editorBody(page)).toHaveText('Taking notes on the webinar')
 })
 
 test('the tray menu has an Opacity submenu with 100 / 85 / 70 / 50 %', async () => {
@@ -327,11 +384,34 @@ test('the tray menu has an Opacity submenu with 100 / 85 / 70 / 50 %', async () 
   await expect.poll(() => requested(app)).toBe(1)
   expect(await choose('Opacity', '42%')).toBe(false)
   expect(await choose('Opacity')).toBe(false)
+
+  // Chosen in the tray while the opacity control is open: the window follows, not just the control.
+  await button(page).click()
+  await expect(popover(page)).toBeVisible()
+  await expect.poll(async () => (await opacity(app)).preview).toBe(1)
+  expect(await choose('Opacity', '50%')).toBe(true)
+  await expect(popover(page).getByTestId('opacity-value')).toHaveText('50%')
+  await expect.poll(async () => (await opacity(app)).preview).toBe(0.5)
+  expect(await requested(app)).toBe(0.5)
+  await expectNative(app, 0.5)
+  await page.keyboard.press('Escape')
+  await expect(popover(page)).toBeHidden()
+})
+
+test('a value picked with the wheel is kept when the app quits straight after', async () => {
+  let ctx = await start()
+  await ctx.page.getByTestId('opacity-button').evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, deltaMode: 0, bubbles: true }))
+  })
+  await stop(ctx)
+  ctx = await start({ dataDir: ctx.dataDir })
+  expect(await stored(ctx.app)).toBe(0.95)
+  await expect(button(ctx.page)).toHaveAccessibleName('Window opacity 95%')
 })
 
 test('solid while in use: the pointer and the keyboard decide, with a grace period and a short fade', async () => {
   const { app, page } = await start()
-  await setPrefs(page, { windowOpacity: 0.6, reducedMotion: 'off' })
+  await setPrefs(page, { windowOpacity: 0.6, opacitySolidOnHover: true, reducedMotion: 'off' })
   await windowEvent(app, 'blur')
   await pointer(page, false)
   await expect.poll(() => requested(app)).toBe(0.6)

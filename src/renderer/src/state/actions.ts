@@ -10,7 +10,7 @@ import { api } from '../lib/api'
 import { captureBoardPositions } from '../lib/flip'
 import { newId } from '../lib/ids'
 import { cleanMessage, type NoteSaver, type SaveState } from './saver'
-import { getState, setState, type CaretHint, type Panel, type Toast, type UndoEntry } from './store'
+import { getState, setState, useStore, type CaretHint, type Panel, type Toast, type UndoEntry } from './store'
 
 const MAX_UNDO = 30
 let toastCounter = 0
@@ -222,6 +222,8 @@ export async function flushAll(): Promise<boolean> {
   } catch {
     saved = false
   }
+  // An opacity picked with the wheel or the keys a moment ago is not stored yet either.
+  await commitOpacity()
   return saved
 }
 
@@ -587,6 +589,17 @@ export function stepWindowOpacity(steps: number, source: 'wheel' | 'shortcut'): 
 
 export function setSolidWhileInUse(on: boolean): void {
   void updatePreferences({ opacitySolidOnHover: on })
+}
+
+/**
+ * The stored opacity can change outside these controls (the tray menu). While the window is
+ * showing a preview and nothing is being adjusted, the preview follows it, so the window shows
+ * what the open control says.
+ */
+export function followStoredOpacity(): () => void {
+  return useStore.subscribe((state, previous) => {
+    if (state.prefs.windowOpacity !== previous.prefs.windowOpacity && opacityLive.draft === null && opacityPreviewing()) syncOpacityPreview()
+  })
 }
 
 /**

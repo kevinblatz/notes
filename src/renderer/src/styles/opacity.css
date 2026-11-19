@@ -19,12 +19,13 @@
   opacity: 0.85;
 }
 
-/* The tiny readout under the icon after a wheel notch or the keyboard shortcut. */
+/* The tiny readout under the icon after a wheel notch or the keyboard shortcut. Above the
+   board, but under menus, panels and sheets (z-index 60 and up), which cover the icon too. */
 .opacity-flash {
   position: absolute;
   top: calc(100% + 5px);
   left: 50%;
-  z-index: 110;
+  z-index: 50;
   transform: translateX(-50%);
   padding: 2px 7px;
   border: 1px solid var(--line-strong);
@@ -122,10 +123,6 @@
   color: var(--ink-faint);
   font-size: 12px;
   line-height: 1.6;
-}
-.opacity-keys kbd {
-  padding: 1px 4px;
-  font-size: 10.5px;
 }
 
 /* ------------------------------------------------------------------ slider */

@@ -214,6 +214,7 @@ function OpacityPanel() {
 function OpacityControl() {
   const value = useShownOpacity()
   const { flash } = useSyncExternalStore(subscribeOpacity, getOpacityLive)
+  const gearOpen = useStore((s) => s.gearOpen)
   const [open, setOpen] = useState(false)
   const [readout, setReadout] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
@@ -255,7 +256,7 @@ function OpacityControl() {
       >
         <OpacityGlyph value={value} />
       </IconButton>
-      {readout && !open ? (
+      {readout && !open && !gearOpen ? (
         <span className="opacity-flash" aria-hidden="true" data-testid="opacity-flash">
           {percent}%
         </span>
