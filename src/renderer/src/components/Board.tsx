@@ -1,22 +1,24 @@
 /**
  * The board: one vertical scrolling surface of notes.
  *
- *  - Clicking genuinely empty space starts a draft at that logical position.
+ *  - Clicking genuinely empty space starts a draft at that logical position. The pen-nib
+ *    cursor says so; the click leaves a drop of ink and the draft grows out of that point.
  *  - Notes are rearranged by dragging their handle; the board reflows live to show exactly
  *    where the note will land, and the other notes move aside to make room.
  *  - Image files dropped on the board start an image note at the drop position.
  */
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type Modifier } from '@dnd-kit/core'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { hitDrag, hitEmptySpace, placementsEqual, type BoardGeometry, type Indicator } from '@shared/boardGeometry'
+import { hitDrag, hitEmptySpace, placementsEqual, type BoardGeometry } from '@shared/boardGeometry'
 import { noteLabel } from '@shared/content'
 import { findNote, insertNote, liftNote, placementOf } from '@shared/layout'
 import type { BoardLayout, Placement } from '@shared/types'
 import { overlayDepth, overlayWasOpenAtPointerDown } from '../lib/escape'
 import { captureBoardPositions, motionReduced, playBoardAnimation, registerBoard } from '../lib/flip'
 import { hasFiles, imageFilesFrom } from '../lib/images'
+import { bloomFrom, endBloom, useInkDrops } from '../lib/ink'
 import { dropNote, startDraft } from '../state/actions'
-import { useStore } from '../state/store'
+import { getState, useStore } from '../state/store'
 import { NoteCard } from './NoteCard'
 
 /** Content width from which a pair is shown side by side instead of stacked. */
@@ -72,10 +74,10 @@ export function Board({ hidden }: { hidden: boolean }) {
 
   const [wide, setWide] = useState(true)
   const [drag, setDrag] = useState<DragState | null>(null)
-  const [indicator, setIndicator] = useState<Indicator | null>(null)
   const [spotId, setSpotId] = useState<string | null>(null)
   const dragRef = useRef<DragState | null>(null)
   dragRef.current = drag
+  const ink = useInkDrops()
 
   const pinSet = useMemo(() => new Set(pins), [pins])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
@@ -115,7 +117,10 @@ export function Board({ hidden }: { hidden: boolean }) {
   useLayoutEffect(() => {
     const element = scroller.current
     if (!element) return
-    if (!hidden) element.scrollTop = savedScroll.current
+    if (hidden) return
+    element.scrollTop = savedScroll.current
+    // The note view that grew from a click is gone; whatever opens next opens normally.
+    endBloom()
   }, [hidden])
 
   // Reveal and briefly outline a note (after editing it, or when picked from search or pins).
@@ -167,27 +172,11 @@ export function Board({ hidden }: { hidden: boolean }) {
     if (Math.abs((scroller.current?.scrollTop ?? 0) - start.scrollTop) > 1) return
     const selection = window.getSelection()
     if (selection && !selection.isCollapsed && selection.toString().length > 0) return
-    setIndicator(null)
-    startDraft(emptyHit(event.clientX, event.clientY).placement)
-  }
-
-  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (dragRef.current) return
-    if (event.target !== event.currentTarget || event.buttons !== 0 || overlayDepth() > 0) {
-      if (indicator) setIndicator(null)
-      return
-    }
-    const { clientX, clientY } = event
-    cancelAnimationFrame(frame.current)
-    frame.current = requestAnimationFrame(() => {
-      if (!board.current || dragRef.current) return
-      setIndicator(emptyHit(clientX, clientY).indicator)
-    })
-  }
-
-  const clearIndicator = (): void => {
-    cancelAnimationFrame(frame.current)
-    setIndicator(null)
+    const { placement } = emptyHit(event.clientX, event.clientY)
+    ink.splash(event.clientX, event.clientY)
+    bloomFrom(event.clientX, event.clientY, scroller.current?.parentElement ?? null)
+    startDraft(placement)
+    if (getState().view.mode !== 'note') endBloom()
   }
 
   // ------------------------------------------------------------ dragging notes
@@ -233,7 +222,6 @@ export function Board({ hidden }: { hidden: boolean }) {
     if (!target) return
     const activator = event.activatorEvent as PointerEvent
     pointer.current = { x: activator.clientX, y: activator.clientY }
-    setIndicator(null)
     captureBoardPositions()
     const state = { id, base: liftNote(layout, id), target }
     dragRef.current = state
@@ -259,14 +247,11 @@ export function Board({ hidden }: { hidden: boolean }) {
     if (!hasFiles(event.dataTransfer)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
-    if (event.target === board.current) setIndicator(emptyHit(event.clientX, event.clientY).indicator)
-    else setIndicator(null)
   }
 
   const onFileDrop = (event: DragEvent<HTMLDivElement>): void => {
     if (!hasFiles(event.dataTransfer)) return
     event.preventDefault()
-    setIndicator(null)
     const files = imageFilesFrom(event.dataTransfer)
     if (files.length === 0) return
     let placement: Placement
@@ -309,10 +294,7 @@ export function Board({ hidden }: { hidden: boolean }) {
           data-testid="board"
           onPointerDown={onPointerDown}
           onClick={onClick}
-          onPointerMove={onPointerMove}
-          onPointerLeave={clearIndicator}
           onDragOver={onFileDragOver}
-          onDragLeave={clearIndicator}
           onDrop={onFileDrop}
         >
           {empty ? <p className="board-hint">Click anywhere to write</p> : null}
@@ -334,18 +316,12 @@ export function Board({ hidden }: { hidden: boolean }) {
               )
             })
           )}
-          {indicator && !drag ? (
-            <span
-              className={`insert-mark is-${indicator.orientation}`}
-              style={indicator.orientation === 'horizontal' ? { left: indicator.x, top: indicator.y, width: indicator.length } : { left: indicator.x, top: indicator.y, height: indicator.length }}
-              aria-hidden
-            />
-          ) : null}
         </div>
         <DragOverlay dropAnimation={null} modifiers={[chipAtPointer]} zIndex={50}>
           {dragged ? <div className="drag-chip">{noteLabel(dragged, 44)}</div> : null}
         </DragOverlay>
       </DndContext>
+      {ink.layer}
     </div>
   )
 }

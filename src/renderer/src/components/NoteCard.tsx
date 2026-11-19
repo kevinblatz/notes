@@ -1,15 +1,16 @@
 /**
  * One note on the board. Controls appear only on hover or keyboard focus: a drag handle,
  * pin, and a small menu. Clicking the note opens it; links, checkboxes, images and text
- * selection keep their normal behaviour.
+ * selection keep their normal behaviour. Pinning gives a small "pressed in" pop.
  */
 import { useDraggable } from '@dnd-kit/core'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronsDownUp, ChevronsUpDown, Ellipsis, GripVertical, Pencil, Pin, PinOff, Trash2 } from 'lucide-react'
-import { memo, useCallback, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { memo, useCallback, useRef, useState, type AnimationEvent, type KeyboardEvent, type MouseEvent } from 'react'
 import { noteLabel } from '@shared/content'
 import type { MoveDirection } from '@shared/layout'
 import type { Note } from '@shared/types'
 import { api } from '../lib/api'
+import { motionReduced } from '../lib/flip'
 import { moveNoteByKeyboard, openImagePreview, openNote, setCollapsed, togglePin, toggleTask, trashNote } from '../state/actions'
 import type { CaretHint } from '../state/store'
 import { NoteContent } from './NoteContent'
@@ -51,6 +52,7 @@ const ARROWS: Record<string, MoveDirection> = { ArrowUp: 'up', ArrowDown: 'down'
 export const NoteCard = memo(function NoteCard({ note, rowId, slot, paired, pinned, placeholder, spotlit }: Props) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef } = useDraggable({ id: note.id })
   const [menuOpen, setMenuOpen] = useState(false)
+  const [pinPop, setPinPop] = useState(false)
   const menuAnchor = useRef<HTMLButtonElement>(null)
   const card = useRef<HTMLElement | null>(null)
   const label = noteLabel(note)
@@ -69,6 +71,16 @@ export const NoteCard = memo(function NoteCard({ note, rowId, slot, paired, pinn
       card.current?.focus({ preventScroll: true })
       card.current?.scrollIntoView({ block: 'nearest' })
     })
+  }
+
+  const pin = (): void => {
+    // Only pinning pops (not unpinning), and only when the user did it, so it never replays.
+    setPinPop(!pinned && !motionReduced())
+    togglePin(note.id)
+  }
+
+  const onPinAnimationEnd = (event: AnimationEvent<HTMLButtonElement>): void => {
+    if (event.animationName === 'pin-pop') setPinPop(false)
   }
 
   const move = (direction: MoveDirection): void => {
@@ -106,7 +118,7 @@ export const NoteCard = memo(function NoteCard({ note, rowId, slot, paired, pinn
 
   const entries: MenuEntry[] = [
     { label: 'Open', icon: <Pencil size={15} />, hint: 'Enter', onSelect: () => openNote(note.id) },
-    { label: pinned ? 'Unpin' : 'Pin', icon: pinned ? <PinOff size={15} /> : <Pin size={15} />, onSelect: () => togglePin(note.id) },
+    { label: pinned ? 'Unpin' : 'Pin', icon: pinned ? <PinOff size={15} /> : <Pin size={15} />, onSelect: pin },
     {
       label: note.collapsed ? 'Expand' : 'Collapse',
       icon: note.collapsed ? <ChevronsUpDown size={15} /> : <ChevronsDownUp size={15} />,
@@ -146,7 +158,7 @@ export const NoteCard = memo(function NoteCard({ note, rowId, slot, paired, pinn
         <button ref={setActivatorNodeRef} type="button" className="icon-button note-handle" {...listeners} {...attributes} tabIndex={-1} aria-label="Drag to move this note" title="Drag to move">
           <GripVertical size={15} />
         </button>
-        <IconButton label={pinned ? 'Unpin' : 'Pin'} active={pinned} onClick={() => togglePin(note.id)}>
+        <IconButton label={pinned ? 'Unpin' : 'Pin'} active={pinned} className={pinPop ? 'is-popping' : undefined} onClick={pin} onAnimationEnd={onPinAnimationEnd}>
           {pinned ? <PinOff size={15} /> : <Pin size={15} />}
         </IconButton>
         <IconButton ref={menuAnchor} label="Note actions" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
