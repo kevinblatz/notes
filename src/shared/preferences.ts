@@ -63,6 +63,83 @@ export function windowOpacityTarget(inputs: OpacityInputs): number {
 }
 
 /**
+ * The values a fade from `from` to `to` passes through, ending exactly on `to`. Eased out, so
+ * most of the change happens at once and the last steps settle gently. Empty when nothing changes.
+ */
+export function opacityFadeSteps(from: number, to: number, count: number): number[] {
+  if (from === to) return []
+  const steps: number[] = []
+  const total = Math.max(1, Math.round(count))
+  for (let i = 1; i < total; i++) {
+    const t = i / total
+    const eased = 1 - (1 - t) * (1 - t)
+    steps.push(Math.round((from + (to - from) * eased) * 1000) / 1000)
+  }
+  steps.push(to)
+  return steps
+}
+
+/** A point along the slider (0 = left end, 1 = right end) as an opacity: the left end is the minimum. */
+export function opacityAtFraction(fraction: number): number {
+  const f = Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : 1
+  return clampOpacity(MIN_WINDOW_OPACITY + f * (1 - MIN_WINDOW_OPACITY))
+}
+
+/** Where an opacity sits along the slider, from 0 (the minimum) to 1 (solid). */
+export function opacityFraction(value: number): number {
+  return (clampOpacity(value) - MIN_WINDOW_OPACITY) / (1 - MIN_WINDOW_OPACITY)
+}
+
+/** The keyboard shortcuts: Ctrl+Shift+Minus is more see-through, Ctrl+Shift+Plus more solid. */
+export const OPACITY_SHORTCUT_LABELS = { down: 'Ctrl+Shift+Minus', up: 'Ctrl+Shift+Plus' } as const
+
+interface ShortcutKey {
+  key: string
+  code: string
+  ctrlKey: boolean
+  metaKey: boolean
+  shiftKey: boolean
+  altKey: boolean
+}
+
+/**
+ * Steps to take for a key press: -1 for Ctrl+Shift+Minus, +1 for Ctrl+Shift+Plus (the = key,
+ * or + on the number pad), 0 for anything else. Alt must be up: Ctrl+Alt is AltGr on many keyboards.
+ */
+export function opacityShortcutSteps(event: ShortcutKey): number {
+  if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey) return 0
+  if (event.key === '-' || event.key === '_' || event.code === 'Minus' || event.code === 'NumpadSubtract') return -1
+  if (event.key === '=' || event.key === '+' || event.code === 'Equal' || event.code === 'NumpadAdd') return 1
+  return 0
+}
+
+/** Scrolling this far counts as one notch of a mouse wheel. */
+const WHEEL_NOTCH = 100
+
+/**
+ * Turn a wheel event into opacity steps. A mouse wheel gives one step per notch (one event of
+ * about 100 pixels, or several notches coalesced into one event); a touchpad's small deltas
+ * are added up in `carry` until they make a notch. Scrolling up (negative delta) is more solid.
+ */
+export function opacityWheelSteps(deltaY: number, carry: number): { steps: number; carry: number } {
+  if (!Number.isFinite(deltaY) || deltaY === 0) return { steps: 0, carry }
+  if (Math.abs(deltaY) >= WHEEL_NOTCH / 2) {
+    return { steps: -Math.sign(deltaY) * Math.max(1, Math.round(Math.abs(deltaY) / WHEEL_NOTCH)), carry: 0 }
+  }
+  // A change of direction starts counting afresh.
+  const total = Math.sign(carry) === Math.sign(deltaY) ? carry + deltaY : deltaY
+  if (Math.abs(total) < WHEEL_NOTCH) return { steps: 0, carry: total }
+  return { steps: -Math.sign(total), carry: 0 }
+}
+
+/** The tray menu's choices: the presets, plus the current value when it is not one of them. */
+export function opacityMenuChoices(current: number): number[] {
+  const value = clampOpacity(current)
+  const choices = OPACITY_PRESETS.includes(value) ? [...OPACITY_PRESETS] : [...OPACITY_PRESETS, value]
+  return choices.sort((a, b) => b - a)
+}
+
+/**
  * Apply an untrusted partial update on top of known-good preferences. Unknown keys and
  * invalid values are ignored, so a bad settings row or backup can never leave the app with
  * unusable preferences.

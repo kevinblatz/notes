@@ -4,6 +4,7 @@
  */
 import { isNoteEmpty, noteLabel, setTaskChecked } from '@shared/content'
 import { anchorOf, describePosition, findNote, keyboardMove, layoutsEqual, moveNote, placeByAnchor, type MoveDirection } from '@shared/layout'
+import { clampOpacity, formatOpacity, stepOpacity } from '@shared/preferences'
 import type { BoardLayout, Note, Placement, Preferences } from '@shared/types'
 import { api } from '../lib/api'
 import { captureBoardPositions } from '../lib/flip'
@@ -429,4 +430,180 @@ export async function updatePreferences(patch: Partial<Preferences>): Promise<vo
 
 export function isOnBoard(noteId: string): boolean {
   return findNote(getState().layout, noteId) !== null
+}
+
+// ---------------------------------------------------------------- window opacity
+//
+// While the user adjusts the opacity, the window shows the value as it is (a preview that
+// wins over "solid while I use it", which would otherwise hide what they are adjusting), and
+// the value is stored once they stop. The value being adjusted lives here rather than in the
+// store, so a slider moving once a frame re-renders only the controls that show it.
+
+/** How long the window keeps showing a newly adjusted value before "solid while I use it" applies again. */
+const OPACITY_HOLD_MS = 1500
+/** A value adjusted with keys or the wheel is stored once adjusting pauses this long. */
+const OPACITY_COMMIT_MS = 450
+
+export interface OpacityLive {
+  /** A value being adjusted that is not stored yet; null when the stored preference is current. */
+  draft: number | null
+  /** Counts quick adjustments (wheel, shortcut), so the title bar can briefly show the new value. */
+  flash: number
+}
+
+let opacityLive: OpacityLive = { draft: null, flash: 0 }
+const opacityListeners = new Set<() => void>()
+/** Open controls (the title bar popover) and drags in progress; while any, the window previews. */
+let opacityControls = 0
+let opacityHold: number | null = null
+let opacityCommit: number | null = null
+let opacityFrame: number | null = null
+/** The preview the main process was last given; null when there is none. */
+let opacitySent: number | null = null
+
+function setOpacityLive(next: OpacityLive): void {
+  opacityLive = next
+  for (const listener of opacityListeners) listener()
+}
+
+/** For useSyncExternalStore. */
+export function subscribeOpacity(listener: () => void): () => void {
+  opacityListeners.add(listener)
+  return () => {
+    opacityListeners.delete(listener)
+  }
+}
+
+export function getOpacityLive(): OpacityLive {
+  return opacityLive
+}
+
+/** The opacity the controls show: the value being adjusted, or else the stored one. */
+export function shownOpacity(): number {
+  return opacityLive.draft ?? getState().prefs.windowOpacity
+}
+
+function opacityPreviewing(): boolean {
+  return opacityControls > 0 || opacityHold !== null
+}
+
+/** Tell the main process what the window should show: at most once a frame while it changes. */
+function syncOpacityPreview(): void {
+  if (!opacityPreviewing()) {
+    // The end is sent at once: a frame callback does not run while the window is hidden.
+    if (opacityFrame !== null) {
+      cancelAnimationFrame(opacityFrame)
+      opacityFrame = null
+    }
+    if (opacitySent !== null) {
+      opacitySent = null
+      api.previewOpacity(null)
+    }
+    return
+  }
+  if (opacityFrame !== null) return
+  opacityFrame = requestAnimationFrame(() => {
+    opacityFrame = null
+    const value = opacityPreviewing() ? shownOpacity() : null
+    if (value === opacitySent) return
+    opacitySent = value
+    api.previewOpacity(value)
+  })
+}
+
+/** Keep showing the adjusted value for a moment after the last change. */
+function holdOpacityPreview(): void {
+  if (opacityHold !== null) window.clearTimeout(opacityHold)
+  opacityHold = window.setTimeout(() => {
+    opacityHold = null
+    syncOpacityPreview()
+  }, OPACITY_HOLD_MS)
+}
+
+function cancelOpacityCommit(): void {
+  if (opacityCommit === null) return
+  window.clearTimeout(opacityCommit)
+  opacityCommit = null
+}
+
+/**
+ * A control that adjusts the opacity opened (the title bar popover) or a drag began. Until
+ * the returned function is called, the window shows the value as it is; after that, for a
+ * moment more, and the value is stored.
+ */
+export function beginOpacityAdjust(): () => void {
+  opacityControls++
+  if (opacityHold !== null) {
+    window.clearTimeout(opacityHold)
+    opacityHold = null
+  }
+  syncOpacityPreview()
+  let ended = false
+  return () => {
+    if (ended) return
+    ended = true
+    opacityControls = Math.max(0, opacityControls - 1)
+    if (opacityControls === 0) holdOpacityPreview()
+    void commitOpacity()
+  }
+}
+
+/**
+ * Show `value` now. `store` says when it is stored: 'now' (a preset), 'soon' once adjusting
+ * pauses (arrow keys, wheel, shortcut), or 'later', by the caller (a drag stores on release).
+ */
+export function adjustOpacity(value: number, store: 'now' | 'soon' | 'later', options: { flash?: boolean } = {}): void {
+  const next = clampOpacity(value)
+  if (next !== opacityLive.draft || options.flash) setOpacityLive({ draft: next, flash: opacityLive.flash + (options.flash ? 1 : 0) })
+  if (opacityControls === 0) holdOpacityPreview()
+  syncOpacityPreview()
+  cancelOpacityCommit()
+  if (store === 'now') void commitOpacity()
+  else if (store === 'soon') {
+    opacityCommit = window.setTimeout(() => {
+      opacityCommit = null
+      void commitOpacity()
+    }, OPACITY_COMMIT_MS)
+  }
+}
+
+/** Store the value being adjusted, if there is one. */
+export async function commitOpacity(): Promise<void> {
+  cancelOpacityCommit()
+  const value = opacityLive.draft
+  if (value === null) return
+  if (value !== getState().prefs.windowOpacity) await updatePreferences({ windowOpacity: value })
+  // Adjusting may have carried on in the meantime: only a value that is now stored stops being a draft.
+  if (opacityLive.draft === value && opacityCommit === null) setOpacityLive({ ...opacityLive, draft: null })
+}
+
+/** The wheel over the title bar icon, or the keyboard shortcut: whole 5 % steps (+ more solid). */
+export function stepWindowOpacity(steps: number, source: 'wheel' | 'shortcut'): void {
+  if (steps === 0) return
+  const next = stepOpacity(shownOpacity(), steps)
+  adjustOpacity(next, 'soon', { flash: true })
+  if (source === 'shortcut') announce(`Window opacity ${formatOpacity(next)}`)
+}
+
+export function setSolidWhileInUse(on: boolean): void {
+  void updatePreferences({ opacitySolidOnHover: on })
+}
+
+/**
+ * Tell the main process when the pointer comes onto the page and leaves it ("solid while I
+ * use it"). Chromium sends these to a window that does not have the keyboard too. Every event
+ * is passed on, so the main process can never be left believing a stale state.
+ */
+export function trackPointerForOpacity(): () => void {
+  const root = document.documentElement
+  const enter = (): void => api.reportPointer(true)
+  const leave = (): void => api.reportPointer(false)
+  root.addEventListener('mouseenter', enter)
+  root.addEventListener('mouseleave', leave)
+  // The pointer may already be over the window when it loads.
+  if (root.matches(':hover')) enter()
+  return () => {
+    root.removeEventListener('mouseenter', enter)
+    root.removeEventListener('mouseleave', leave)
+  }
 }

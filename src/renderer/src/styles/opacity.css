@@ -1,1 +1,194 @@
 /* Styles for the window opacity control. Loaded after app.css and uses its design tokens. */
+
+/* ------------------------------------------------------------------ title bar button */
+
+.opacity-control {
+  position: relative;
+  display: inline-flex;
+}
+/* The drop fills with the icon colour; it drains as the window becomes see-through. */
+.opacity-glyph-fill {
+  opacity: 0.7;
+}
+/* See-through is a state worth noticing at a glance: the drop takes the accent colour. */
+.opacity-button.is-see-through,
+.opacity-button.is-see-through:hover:not(:disabled) {
+  color: var(--accent);
+}
+.opacity-button.is-see-through .opacity-glyph-fill {
+  opacity: 0.85;
+}
+
+/* The tiny readout under the icon after a wheel notch or the keyboard shortcut. */
+.opacity-flash {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  z-index: 110;
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: opacity-flash-in 90ms var(--ease);
+}
+@keyframes opacity-flash-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -2px);
+  }
+}
+
+/* ------------------------------------------------------------------ popover */
+
+.popover.opacity-popover {
+  width: 268px;
+  padding: 12px 14px 11px;
+}
+.opacity-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.opacity-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.opacity-title {
+  font-weight: 600;
+}
+.opacity-value {
+  flex: none;
+  min-width: 4ch;
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.opacity-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--line);
+}
+.opacity-preset {
+  padding: 4px 0;
+  border-radius: 6px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.opacity-preset:hover {
+  color: var(--ink);
+}
+.opacity-preset[aria-pressed='true'] {
+  background: var(--raised);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.opacity-solid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.opacity-solid-label {
+  font-weight: 600;
+}
+.opacity-help {
+  margin-top: 1px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.opacity-keys {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.opacity-keys kbd {
+  padding: 1px 4px;
+  font-size: 10.5px;
+}
+
+/* ------------------------------------------------------------------ slider */
+
+.opacity-slider {
+  /* The ring that lifts the thumb off the track matches whatever the slider sits on. */
+  --opacity-ring: var(--raised);
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: none;
+}
+.opacity-slider:focus-visible {
+  outline: 0;
+}
+.opacity-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  margin: 0 8px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+.opacity-track-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--opacity-fill);
+  border-radius: inherit;
+  background: var(--accent);
+}
+.opacity-thumb {
+  position: absolute;
+  top: 50%;
+  left: var(--opacity-fill);
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 3px var(--opacity-ring);
+  transition: transform 90ms var(--ease);
+}
+.opacity-slider:hover .opacity-thumb {
+  transform: scale(1.12);
+}
+.opacity-slider:focus-visible .opacity-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* ------------------------------------------------------------------ settings */
+
+.sheet .opacity-slider {
+  --opacity-ring: var(--sheet);
+  margin: 0 -8px 2px;
+}
+.opacity-setting .setting-row {
+  align-items: flex-start;
+  padding-bottom: 4px;
+}
+.opacity-setting .opacity-value {
+  padding-top: 1px;
+}

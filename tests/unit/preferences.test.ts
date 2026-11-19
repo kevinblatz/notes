@@ -7,7 +7,13 @@ import {
   MIN_WINDOW_OPACITY,
   OPACITY_PRESETS,
   OPACITY_STEP,
+  opacityAtFraction,
+  opacityFadeSteps,
+  opacityFraction,
+  opacityMenuChoices,
   opacityPercent,
+  opacityShortcutSteps,
+  opacityWheelSteps,
   stepOpacity,
   windowOpacityTarget,
   type OpacityInputs
@@ -146,5 +152,125 @@ describe('windowOpacityTarget', () => {
     expect(target({ preview: 0 })).toBe(0.3)
     expect(target({ preview: -1 })).toBe(0.3)
     expect(target({ chosen: Number.NaN })).toBe(1)
+  })
+})
+
+describe('opacityFadeSteps', () => {
+  it('passes through a few values and ends exactly on the target', () => {
+    const steps = opacityFadeSteps(0.6, 1, 6)
+    expect(steps).toHaveLength(6)
+    expect(steps.at(-1)).toBe(1)
+    expect([...steps].sort((a, b) => a - b)).toEqual(steps)
+    for (const value of steps) {
+      expect(value).toBeGreaterThan(0.6)
+      expect(value).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('eases out: most of the change happens in the first steps', () => {
+    const steps = opacityFadeSteps(1, 0.5, 6)
+    expect(steps.at(-1)).toBe(0.5)
+    expect([...steps].sort((a, b) => b - a)).toEqual(steps)
+    expect(1 - steps[0]!).toBeGreaterThan(steps[4]! - steps[5]!)
+    expect(steps[2]!).toBeLessThan(0.75)
+  })
+
+  it('is empty when nothing changes, and a single step when asked for one', () => {
+    expect(opacityFadeSteps(0.7, 0.7, 6)).toEqual([])
+    expect(opacityFadeSteps(1, 0.4, 1)).toEqual([0.4])
+    expect(opacityFadeSteps(1, 0.4, 0)).toEqual([0.4])
+  })
+})
+
+describe('slider positions', () => {
+  it('put the minimum at the left end and solid at the right end, in whole percent', () => {
+    expect(opacityAtFraction(0)).toBe(MIN_WINDOW_OPACITY)
+    expect(opacityAtFraction(1)).toBe(1)
+    expect(opacityAtFraction(0.5)).toBe(0.65)
+    expect(opacityAtFraction(-3)).toBe(MIN_WINDOW_OPACITY)
+    expect(opacityAtFraction(7)).toBe(1)
+    expect(opacityAtFraction(Number.NaN)).toBe(1)
+  })
+
+  it('map back to the same place', () => {
+    expect(opacityFraction(MIN_WINDOW_OPACITY)).toBe(0)
+    expect(opacityFraction(1)).toBe(1)
+    for (const value of [0.3, 0.45, 0.5, 0.7, 0.85, 1]) expect(opacityAtFraction(opacityFraction(value))).toBe(value)
+    expect(opacityFraction(0.1)).toBe(0)
+  })
+})
+
+describe('opacityShortcutSteps', () => {
+  const key = (patch: Partial<Parameters<typeof opacityShortcutSteps>[0]>) =>
+    opacityShortcutSteps({ key: '', code: '', ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, ...patch })
+
+  it('Ctrl+Shift+Minus is more see-through, Ctrl+Shift+Plus more solid', () => {
+    expect(key({ key: '_', code: 'Minus' })).toBe(-1)
+    expect(key({ key: '+', code: 'Equal' })).toBe(1)
+    expect(key({ key: '-', code: 'NumpadSubtract' })).toBe(-1)
+    expect(key({ key: '+', code: 'NumpadAdd' })).toBe(1)
+    // Layouts where the keys sit elsewhere still match by the character typed.
+    expect(key({ key: '_', code: 'Slash' })).toBe(-1)
+    expect(key({ key: '+', code: 'BracketRight' })).toBe(1)
+  })
+
+  it('needs Ctrl (or Cmd) and Shift, and never fires with Alt (AltGr on many keyboards)', () => {
+    expect(key({ key: '-', code: 'Minus', shiftKey: false })).toBe(0)
+    expect(key({ key: '-', code: 'Minus', ctrlKey: false })).toBe(0)
+    expect(key({ key: '-', code: 'Minus', ctrlKey: false, metaKey: true })).toBe(-1)
+    expect(key({ key: '-', code: 'Minus', altKey: true })).toBe(0)
+    expect(key({ key: 'K', code: 'KeyK' })).toBe(0)
+    expect(key({ key: 'ArrowUp', code: 'ArrowUp' })).toBe(0)
+  })
+})
+
+describe('opacityWheelSteps', () => {
+  it('gives one step per mouse-wheel notch; scrolling up is more solid', () => {
+    expect(opacityWheelSteps(100, 0)).toEqual({ steps: -1, carry: 0 })
+    expect(opacityWheelSteps(-100, 0)).toEqual({ steps: 1, carry: 0 })
+    expect(opacityWheelSteps(120, 0).steps).toBe(-1)
+    expect(opacityWheelSteps(53, 0).steps).toBe(-1)
+  })
+
+  it('counts several notches that arrive in one event', () => {
+    expect(opacityWheelSteps(300, 0).steps).toBe(-3)
+    expect(opacityWheelSteps(-200, 0).steps).toBe(2)
+  })
+
+  it('adds up a touchpad’s small deltas into whole notches', () => {
+    let carry = 0
+    const steps: number[] = []
+    for (let i = 0; i < 10; i++) {
+      const result = opacityWheelSteps(20, carry)
+      carry = result.carry
+      steps.push(result.steps)
+    }
+    expect(steps.filter((s) => s !== 0)).toEqual([-1, -1])
+    expect(steps.indexOf(-1)).toBe(4)
+  })
+
+  it('starts counting afresh when the direction changes, and ignores nothing-deltas', () => {
+    expect(opacityWheelSteps(-20, 80)).toEqual({ steps: 0, carry: -20 })
+    expect(opacityWheelSteps(0, 40)).toEqual({ steps: 0, carry: 40 })
+    expect(opacityWheelSteps(Number.NaN, 40)).toEqual({ steps: 0, carry: 40 })
+  })
+})
+
+describe('opacityMenuChoices', () => {
+  it('offers the presets from solid down', () => {
+    expect(opacityMenuChoices(1)).toEqual([1, 0.85, 0.7, 0.5])
+    expect(opacityMenuChoices(0.7)).toEqual([1, 0.85, 0.7, 0.5])
+  })
+
+  it('adds the current value in its place when it is not a preset', () => {
+    expect(opacityMenuChoices(0.65)).toEqual([1, 0.85, 0.7, 0.65, 0.5])
+    expect(opacityMenuChoices(0.3)).toEqual([1, 0.85, 0.7, 0.5, 0.3])
+    expect(opacityMenuChoices(0.95)).toEqual([1, 0.95, 0.85, 0.7, 0.5])
+    expect(opacityMenuChoices(0.1)).toEqual([1, 0.85, 0.7, 0.5, 0.3])
+  })
+
+  it('does not change the presets', () => {
+    opacityMenuChoices(0.4)
+    expect(OPACITY_PRESETS).toEqual([1, 0.85, 0.7, 0.5])
   })
 })

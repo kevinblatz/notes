@@ -15,7 +15,7 @@
 import { pathToFileURL } from 'node:url'
 import { BrowserWindow, screen, systemPreferences, type Display, type Rectangle } from 'electron'
 import { IPC } from '@shared/ipc'
-import { clampOpacity, windowOpacityTarget } from '@shared/preferences'
+import { clampOpacity, opacityFadeSteps, windowOpacityTarget } from '@shared/preferences'
 import type { DockSide, MainEvents, Preferences, WindowStatus } from '@shared/types'
 import {
   dockBounds,
@@ -82,6 +82,8 @@ export interface OpacityState {
   leavePending: boolean
   /** The values applied for the latest change: one for an instant change, several for a fade. */
   lastChange: number[]
+  /** How many times the opacity has been applied to the window (setOpacity calls, fade steps included). */
+  applyCount: number
 }
 
 /** Equal within a couple of pixels, to absorb rounding at fractional display scale factors. */
@@ -125,6 +127,7 @@ export class WindowManager {
   private leaveTimer: NodeJS.Timeout | null = null
   private fadeTimer: NodeJS.Timeout | null = null
   private lastChange: number[] = []
+  private applyCount = 0
 
   constructor(private readonly options: WindowManagerOptions) {}
 
@@ -174,6 +177,7 @@ export class WindowManager {
     this.win = win
     win.setMenu(null)
     this.applyBounds(resolved.bounds)
+    this.initOpacity(win, mode)
 
     // The window only ever shows the app itself. Links are opened through a validated IPC call.
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -204,6 +208,10 @@ export class WindowManager {
     }
     win.on('show', reassertTopmost)
     win.on('restore', reassertTopmost)
+    // The same for opacity: whatever Windows did to the window while it was away, it comes back
+    // with the opacity the app last gave it.
+    win.on('show', () => this.reassertOpacity())
+    win.on('restore', () => this.reassertOpacity())
     // Monitor changes are skipped while maximized; catch up once the window is restored.
     win.on('unmaximize', () => {
       if (!this.displayCheckOwed) return
@@ -417,9 +425,20 @@ export class WindowManager {
     if (win.isMinimized()) win.restore()
     if (!isUsablyVisible(win.getNormalBounds(), this.displays())) this.reconcileDisplays()
     if (focus) {
+      // Asked for in order to type in them: the notes appear as they will be once they have
+      // the keyboard, rather than see-through for a moment first.
+      this.hasKeyboard = true
+      this.updateOpacity()
       win.show()
       win.focus()
+      // Windows can refuse to hand over the keyboard. Then there will be no focus or blur
+      // event to correct the guess, so correct it here.
+      if (process.platform === 'win32' && !win.isFocused()) {
+        this.hasKeyboard = false
+        this.updateOpacity()
+      }
     } else {
+      this.updateOpacity()
       win.showInactive()
     }
     this.options.onStatusChange()
@@ -469,6 +488,226 @@ export class WindowManager {
       focused: win ? win.isFocused() : false,
       maximized: win ? win.isMaximized() : false
     }
+  }
+
+  // ------------------------------------------------------------ opacity
+
+  /**
+   * Set the opacity before the window is first shown, so a see-through window never flashes
+   * solid at start-up, and listen for everything that decides it from then on.
+   */
+  private initOpacity(win: BrowserWindow, mode: ShowMode): void {
+    const prefs = this.options.getPreferences()
+    this.pointerOnPage = false
+    this.pointerOnFrame = false
+    this.pointerInside = false
+    this.hasKeyboard = false
+    this.opacityPreview = null
+    this.layered = false
+    this.appliedOpacity = 1
+    // Shown with the keyboard (an ordinary start), the window will be in use straight away.
+    const initial = windowOpacityTarget({
+      chosen: prefs.windowOpacity,
+      solidOnHover: prefs.opacitySolidOnHover,
+      pointerInside: false,
+      focused: mode === 'focus',
+      preview: null
+    })
+    this.initialOpacity = initial
+    this.requestedOpacity = initial
+    this.lastChange = [initial]
+    this.setNativeOpacity(initial)
+
+    // Having the keyboard is one half of "in use"; the pointer being over the window is the other.
+    win.on('focus', () => {
+      this.hasKeyboard = true
+      this.updateOpacity()
+    })
+    win.on('blur', () => {
+      this.hasKeyboard = false
+      this.updateOpacity()
+    })
+    // A hidden or minimized window has no pointer over it, and nothing is animated while away.
+    const gone = (): void => {
+      this.clearLeaveTimer()
+      this.pointerOnPage = false
+      this.pointerOnFrame = false
+      this.pointerInside = false
+      this.updateOpacity({ instant: true })
+    }
+    win.on('hide', gone)
+    win.on('minimize', gone)
+    // A page that is reloaded or replaced can no longer end its preview or report the pointer.
+    const pageReset = (): void => {
+      this.opacityPreview = null
+      this.reportPointer('page', false)
+      this.updateOpacity()
+    }
+    win.webContents.on('render-process-gone', pageReset)
+    win.webContents.on('did-start-loading', pageReset)
+
+    if (process.platform === 'win32') {
+      // Called for every mouse move over the frame, so it does nothing unless the state changes.
+      win.hookWindowMessage(WM_NCMOUSEMOVE, () => {
+        if (!this.pointerOnFrame) this.reportPointer('frame', true)
+      })
+      win.hookWindowMessage(WM_NCMOUSELEAVE, () => {
+        if (this.pointerOnFrame) this.reportPointer('frame', false)
+      })
+    }
+  }
+
+  /** What decides the window's opacity right now, for the automated desktop tests. */
+  opacityState(): OpacityState {
+    const prefs = this.options.getPreferences()
+    const win = this.window
+    return {
+      chosen: prefs.windowOpacity,
+      solidOnHover: prefs.opacitySolidOnHover,
+      preview: this.opacityPreview,
+      pointerInside: this.pointerInside,
+      focused: this.hasKeyboard,
+      requested: this.requestedOpacity,
+      applied: this.appliedOpacity,
+      native: win ? win.getOpacity() : 1,
+      initial: this.initialOpacity,
+      fading: this.fadeTimer !== null,
+      leavePending: this.leaveTimer !== null,
+      lastChange: [...this.lastChange],
+      applyCount: this.applyCount
+    }
+  }
+
+  /** The opacity the window should have, given everything known right now. */
+  private opacityTarget(pointerInside = this.pointerInside): number {
+    // A preview is shown as it is; no need to look anything else up for it (it arrives once a frame).
+    if (this.opacityPreview !== null) return clampOpacity(this.opacityPreview)
+    const prefs = this.options.getPreferences()
+    return windowOpacityTarget({
+      chosen: prefs.windowOpacity,
+      solidOnHover: prefs.opacitySolidOnHover,
+      pointerInside,
+      focused: this.hasKeyboard,
+      preview: null
+    })
+  }
+
+  /**
+   * Bring the opacity in line with the preference, the pointer, the keyboard and any preview.
+   * Called after any of them changes; does nothing when the window already has (or is fading
+   * to) the right value. Never touches focus, position or z-order.
+   */
+  updateOpacity(options: { instant?: boolean } = {}): void {
+    const win = this.window
+    if (!win) return
+    const target = this.opacityTarget()
+    if (target === this.requestedOpacity && (this.fadeTimer !== null || this.appliedOpacity === target)) return
+    const instant = options.instant === true || !win.isVisible() || win.isMinimized() || this.prefersReducedMotion()
+    this.fadeTo(target, instant)
+  }
+
+  /**
+   * The pointer came onto the notes or left them, as the page reports it or (on Windows) the
+   * window frame: the title bar's drag strip and the resize border are not part of the page.
+   */
+  reportPointer(source: PointerSource, inside: boolean): void {
+    if (source === 'page') {
+      this.pointerOnPage = inside
+      // On the page means off the frame, whatever the frame said last.
+      if (inside) this.pointerOnFrame = false
+    } else {
+      this.pointerOnFrame = inside
+    }
+    if (this.pointerOnPage || this.pointerOnFrame) {
+      this.clearLeaveTimer()
+      if (this.pointerInside) return
+      this.pointerInside = true
+      this.updateOpacity()
+      return
+    }
+    if (!this.pointerInside || this.leaveTimer) return
+    // When leaving makes no visible difference (solid anyway, or kept solid by the keyboard),
+    // there is nothing to wait for.
+    if (this.opacityTarget(false) === this.opacityTarget(true)) {
+      this.pointerInside = false
+      return
+    }
+    // Otherwise the pointer counts as gone only once it has stayed away for a moment, so
+    // brushing past the edge of the window does not make it flicker.
+    this.leaveTimer = setTimeout(() => {
+      this.leaveTimer = null
+      this.pointerInside = false
+      this.updateOpacity()
+    }, POINTER_LEAVE_MS)
+  }
+
+  /**
+   * Show this opacity now, without storing it, because the user is adjusting it: it wins over
+   * "solid while I use it" so they can see what they are choosing. Null ends the preview.
+   */
+  previewOpacity(value: number | null): void {
+    const next = value === null ? null : clampOpacity(value)
+    if (next === this.opacityPreview) return
+    // Following a slider follows it exactly; only the start and the end of a preview fade.
+    const continuing = this.opacityPreview !== null && next !== null
+    this.opacityPreview = next
+    this.updateOpacity({ instant: continuing })
+  }
+
+  private clearLeaveTimer(): void {
+    if (!this.leaveTimer) return
+    clearTimeout(this.leaveTimer)
+    this.leaveTimer = null
+  }
+
+  private prefersReducedMotion(): boolean {
+    const setting = this.options.getPreferences().reducedMotion
+    if (setting !== 'system') return setting === 'on'
+    try {
+      return systemPreferences.getAnimationSettings().prefersReducedMotion
+    } catch {
+      return false
+    }
+  }
+
+  /** Go to `target` at once, or in a few short steps (about 150 ms) that run only while it changes. */
+  private fadeTo(target: number, instant: boolean): void {
+    this.requestedOpacity = target
+    if (this.fadeTimer) {
+      clearTimeout(this.fadeTimer)
+      this.fadeTimer = null
+    }
+    const steps = instant ? [target] : opacityFadeSteps(this.appliedOpacity, target, FADE_STEPS)
+    if (steps.length === 0) return
+    this.lastChange = steps
+    let index = 0
+    const step = (): void => {
+      this.fadeTimer = null
+      const value = steps[index++]
+      if (value === undefined) return
+      this.setNativeOpacity(value)
+      if (index < steps.length) this.fadeTimer = setTimeout(step, FADE_STEP_MS)
+    }
+    step()
+  }
+
+  private setNativeOpacity(value: number): void {
+    const win = this.window
+    if (!win) return
+    this.appliedOpacity = value
+    // Windows makes a window "layered" the first time its opacity is set. One that has never
+    // been see-through is left an ordinary window.
+    if (!this.layered && value >= 1) return
+    win.setOpacity(value)
+    this.layered = true
+    this.applyCount++
+  }
+
+  private reassertOpacity(): void {
+    const win = this.window
+    if (!win || !this.layered) return
+    win.setOpacity(this.appliedOpacity)
+    this.applyCount++
   }
 
   // ------------------------------------------------------------ messaging

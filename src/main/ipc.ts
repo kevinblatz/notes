@@ -4,7 +4,7 @@
  */
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, dialog, ipcMain, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { z } from 'zod'
 import { isValidAccelerator } from '@shared/accelerator'
 import { isOpenableExternalUrl } from '@shared/content'
@@ -56,6 +56,9 @@ const zImage = z.object({
 const zWindowAction = z.enum(['hide', 'minimize', 'toggle-maximize', 'quit', 'dock-left', 'dock-right'])
 const zEdit = z.enum(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'undo', 'redo'])
 const zImport = z.object({ token: z.string().max(100), mode: z.enum(['merge', 'replace']) })
+const zPointer = z.boolean()
+// Any finite number is accepted and then held to the allowed range by the window manager.
+const zOpacityPreview = z.number().nullable()
 
 function toBytes(value: ArrayBuffer | ArrayBufferView): Uint8Array {
   if (value instanceof ArrayBuffer) return new Uint8Array(value)
@@ -326,6 +329,25 @@ export function registerIpc(context: IpcContext): void {
     context.setUnsaved(unsaved)
   })
 
+  /** Messages without a reply are held to the same rule: only the app's own top-level page. */
+  const fromApp = (event: IpcMainEvent): boolean => {
+    const frame = event.senderFrame
+    return !!frame && frame === event.sender.mainFrame && event.sender === windows.window?.webContents && windows.isTrustedFrameUrl(frame.url)
+  }
+
+  // "Solid while I use it": the page says when the pointer comes onto it and leaves it.
+  ipcMain.on(IPC.pointer, (event, inside: unknown) => {
+    if (!fromApp(event)) return
+    const parsed = zPointer.safeParse(inside)
+    if (parsed.success) windows.reportPointer('page', parsed.data)
+  })
+
+  // The value being adjusted, at most once a frame while a slider moves; null when done.
+  ipcMain.on(IPC.opacityPreview, (event, value: unknown) => {
+    if (!fromApp(event)) return
+    const parsed = zOpacityPreview.safeParse(value)
+    if (parsed.success) windows.previewOpacity(parsed.data)
+  })
 }
 
 function messageOf(error: unknown): string {
