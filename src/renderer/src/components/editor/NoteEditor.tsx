@@ -5,8 +5,9 @@
  */
 import type { Editor } from '@tiptap/core'
 import { closeHistory } from '@tiptap/pm/history'
+import { TextSelection } from '@tiptap/pm/state'
 import { EditorContent, useEditor } from '@tiptap/react'
-import { ArrowLeft, BookPlus, ClipboardPaste, Copy, Plus, Scissors, Tag, TextSelect, Type, X } from 'lucide-react'
+import { ArrowLeft, Plus, Tag, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { emptyDoc, SUGGESTED_TAGS, sanitizeTags } from '@shared/content'
 import { collectTags } from '@shared/search'
@@ -16,11 +17,12 @@ import { overlayDepth, useEscape } from '../../lib/escape'
 import { ACCEPT_ATTRIBUTE, hasFiles, imageFilesFrom } from '../../lib/images'
 import { sanitizePastedHtml } from '../../lib/pasteSanitizer'
 import { getSpeller, loadSpelling, useSpeller } from '../../lib/spelling'
-import { announce, noteSaved, noteSaveState, returnToBoard, setActiveEditor, setActiveSaver, toast, updatePreferences, type EditorHandle } from '../../state/actions'
+import { noteSaved, noteSaveState, returnToBoard, setActiveEditor, setActiveSaver, toast, type EditorHandle } from '../../state/actions'
 import { NoteSaver, type SaveState } from '../../state/saver'
 import { getState, useStore, type View } from '../../state/store'
-import { inputMissAt, SpellInput } from '../SpellInput'
-import { MenuList, Popover, type MenuEntry } from '../ui'
+import { editEntries, openedFromKeyboard, spellingEntries } from '../editMenu'
+import { SpellInput } from '../SpellInput'
+import { MenuList, Popover } from '../ui'
 import { useDrawingSession } from './drawingSession'
 import { appendLogEntries, buildExtensions, insertImageFiles, positionFromHint, syncSelectionFromPage } from './extensions'
 import { FormatBar, SelectionBubble } from './FormatBar'
@@ -29,9 +31,8 @@ import { spellingExtension, spellKey, wordAtPosition } from './spelling'
 
 type NoteView = Extract<View, { mode: 'note' }>
 
-/** A misspelled word the context menu was opened on, with what it could be instead. */
+/** A misspelled word in the note text the context menu was opened on, with what it could be instead. */
 interface SpellingTarget {
-  field: 'text' | 'title'
   from: number
   to: number
   word: string
@@ -141,7 +142,7 @@ export function NoteEditor({ view }: { view: NoteView }) {
   const [tags, setTags] = useState<string[]>(initial?.tags ?? [])
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' })
   const [dropActive, setDropActive] = useState(false)
-  const [menu, setMenu] = useState<{ x: number; y: number; spelling: SpellingTarget | null } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean; spelling: SpellingTarget | null } | null>(null)
   const titleRef = useRef(title)
   const tagsRef = useRef(tags)
   const saverRef = useRef<NoteSaver | null>(null)
@@ -344,58 +345,59 @@ export function NoteEditor({ view }: { view: NoteView }) {
     void insertImageFiles(editor, files, editor.state.doc.content.size).then(reportImageErrors)
   }
 
-  /** The misspelled word under the pointer, in the text or the title, if spelling is on. */
-  const spellingTargetAt = (target: HTMLElement, x: number, y: number): SpellingTarget | null => {
+  /** The misspelled word at a position in the note text, if spelling is on. */
+  const spellingTargetAt = (pos: number | null): SpellingTarget | null => {
     const checker = getSpeller()
-    if (!checker.ready || !getState().prefs.spellcheck) return null
-    if (target.closest('.ProseMirror')) {
-      const at = editor.view.posAtCoords({ left: x, top: y })
-      const word = at ? wordAtPosition(editor.state, at.pos, checker) : null
-      if (!word?.misspelled) return null
-      return { field: 'text', from: word.from, to: word.to, word: word.word, suggestions: checker.suggest(word.word, word.context) }
-    }
-    const miss = inputMissAt(target, x, y)
-    return miss ? { field: 'title', ...miss, suggestions: checker.suggest(miss.word) } : null
+    if (pos === null || !checker.ready || !getState().prefs.spellcheck) return null
+    const word = wordAtPosition(editor.state, pos, checker)
+    if (!word?.misspelled) return null
+    return { from: word.from, to: word.to, word: word.word, suggestions: checker.suggest(word.word, word.context) }
   }
 
   const onContextMenu = (event: ReactMouseEvent): void => {
     const target = event.target as HTMLElement
-    if (!target.closest('.ProseMirror, .focus-title')) return
+    // The title, captions and the tag field have menus of their own (SpellInput).
+    if (!target.closest('.ProseMirror') || target.closest('.spell-field')) return
     event.preventDefault()
-    setMenu({ x: event.clientX, y: event.clientY, spelling: spellingTargetAt(target, event.clientX, event.clientY) })
+    if (openedFromKeyboard(event)) {
+      // The menu key or Shift+F10: the menu opens at the caret and takes the keyboard. The caret
+      // is read from the page: the editor learns of a move by arrow key a moment later.
+      let head = editor.state.selection.head
+      const caret = window.getSelection()
+      if (caret?.isCollapsed && caret.focusNode && editor.view.dom.contains(caret.focusNode)) {
+        try {
+          head = editor.view.posAtDOM(caret.focusNode, caret.focusOffset)
+          // ... and told now, so the caret is where it was when the menu gives the keyboard back.
+          if (head !== editor.state.selection.head) editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, head)))
+        } catch {
+          // Keep the editor's own idea of the caret.
+        }
+      }
+      const at = editor.view.coordsAtPos(head)
+      setMenu({ x: at.left, y: at.bottom, keyboard: true, spelling: spellingTargetAt(head) })
+      return
+    }
+    const at = editor.view.posAtCoords({ left: event.clientX, top: event.clientY })
+    setMenu({ x: event.clientX, y: event.clientY, keyboard: false, spelling: spellingTargetAt(at?.pos ?? null) })
   }
 
   /** Replace a misspelled word with a suggestion: one undo step in the text. */
   const replaceWord = (spelling: SpellingTarget, replacement: string): void => {
-    if (spelling.field === 'title') {
-      const current = titleRef.current
-      if (current.slice(spelling.from, spelling.to) !== spelling.word) return
-      titleAccess.set(current.slice(0, spelling.from) + replacement + current.slice(spelling.to))
-      return
-    }
     if (editor.isDestroyed || editor.state.doc.textBetween(spelling.from, spelling.to) !== spelling.word) return
     editor.view.dispatch(closeHistory(editor.state.tr.insertText(replacement, spelling.from, spelling.to)))
     editor.view.dispatch(closeHistory(editor.state.tr))
     editor.view.focus()
   }
 
-  const addToDictionary = (word: string): void => {
-    void updatePreferences({ spellingWords: [...getState().prefs.spellingWords, word] })
-    announce(`Added ${word} to your dictionary.`)
-  }
-
   const hasSelection = !editor.state.selection.empty
-  const closeMenu = (): void => setMenu(null)
+  const refocusText = (): void => {
+    if (!editor.isDestroyed) editor.view.focus()
+  }
+  const closeMenu = (): void => {
+    if (menu?.keyboard) refocusText()
+    setMenu(null)
+  }
   const spelling = menu?.spelling ?? null
-  const spellingEntries: MenuEntry[] = spelling
-    ? [
-        ...(spelling.suggestions.length > 0
-          ? spelling.suggestions.map((suggestion): MenuEntry => ({ label: suggestion, strong: true, onSelect: () => replaceWord(spelling, suggestion) }))
-          : [{ kind: 'label', label: 'No suggestions' } as const]),
-        { label: 'Add to dictionary', icon: <BookPlus size={15} />, onSelect: () => addToDictionary(spelling.word) },
-        { kind: 'separator' }
-      ]
-    : []
 
   return (
     <section className="focus-view" aria-label="Note" data-testid="focus-view">
@@ -489,19 +491,11 @@ export function NoteEditor({ view }: { view: NoteView }) {
       />
 
       <span ref={menuAnchor} className="context-anchor" style={menu ? { left: menu.x, top: menu.y } : undefined} />
-      <Popover anchor={menuAnchor.current} open={menu !== null} onClose={closeMenu} role="menu" label="Edit" keepFocus closeOnScroll>
+      <Popover anchor={menuAnchor.current} open={menu !== null} onClose={closeMenu} role="menu" label="Edit" keepFocus={!menu?.keyboard} closeOnScroll>
         <MenuList
           onDone={closeMenu}
-          keepFocus
-          entries={[
-            ...spellingEntries,
-            { label: 'Cut', icon: <Scissors size={15} />, hint: 'Ctrl+X', disabled: !hasSelection, onSelect: () => void api.edit('cut') },
-            { label: 'Copy', icon: <Copy size={15} />, hint: 'Ctrl+C', disabled: !hasSelection, onSelect: () => void api.edit('copy') },
-            { label: 'Paste', icon: <ClipboardPaste size={15} />, hint: 'Ctrl+V', onSelect: () => void api.edit('paste') },
-            { label: 'Paste as plain text', icon: <Type size={15} />, hint: 'Ctrl+Shift+V', onSelect: () => void api.edit('pastePlain') },
-            { kind: 'separator' },
-            { label: 'Select all', icon: <TextSelect size={15} />, hint: 'Ctrl+A', onSelect: () => void api.edit('selectAll') }
-          ]}
+          keepFocus={!menu?.keyboard}
+          entries={[...spellingEntries(spelling, (replacement) => spelling && replaceWord(spelling, replacement)), ...editEntries(hasSelection, refocusText)]}
         />
       </Popover>
     </section>

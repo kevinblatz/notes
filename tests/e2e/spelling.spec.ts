@@ -3,15 +3,18 @@
  * the Spelling settings) and the Organize button (Ctrl+Shift+O): one undoable step that
  * fixes every word and the punctuation, and puts thoughts that strayed back together.
  */
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { clickEmptySpace, collectConsoleErrors, copyImageToClipboard, editorBody, focusView, makePng, noteByText, storedNotes } from './helpers'
-import { launch, removeDataDir, setWindowSize, type Launched } from './launch'
+import { freshDataDir, launch, removeDataDir, setWindowSize, type Launched } from './launch'
 
 const SIZE = { width: 960, height: 1000 }
 
+/** A dump of the day typed in a hurry, with a thought that strays off and comes back ("anyway"). */
 const DUMP =
-  'nwog at 6120 was the draw, asia made eql at 6098 and london swept them then displacment up leaving a fvg on 5m. i was bullish bias from premarket bc pdh 6135 unswept. took long at 6104 in the ifvg stop 6096 tp 6130 got stopped out first time lol felt fomo and re entered to early. second entry worked +2r. lesson dont chase the first push wait for mss. felt calm after tho. ny am killzone was clean, silver bullet 10-11 gave the move'
+  'nwog at 6120 was the draw, asia made eql at 6098 and london swept them then displacment up leaving a fvg on 5m. ugh my neighbor is drilling again cant focus. anyway i was bullish bias from premarket bc pdh 6135 unswept. took long at 6104 in the ifvg stop 6096 tp 6130 got stopped out first time lol felt fomo and re entered to early. second entry worked +2r. lesson dont chase the first push wait for mss. felt calm after tho. ny am killzone was clean, silver bullet 10-11 gave the move'
 const MINDSET =
   'today i felt imapatient from the open and i know thats when i make my worst trades. need to trust the process and let the setup come to me, the market will always be there tommorow'
 
@@ -199,21 +202,48 @@ test('the quick note strip and image captions are checked too', async () => {
   await page.locator('.focus-editor .image-caption').fill('sweep of teh low ')
   await expect.poll(() => page.locator('.image-caption-field .spell-miss').allTextContents()).toEqual(['teh'])
 
+  // Right-click the caption's underlined word: its suggestions, and the fix is the caption's.
+  await rightClickMiss(page, '.image-caption-field', 'teh')
+  await expect(editMenu(page).locator('.menu-item .menu-text').first()).toHaveText('the')
+  expect((await editMenu(page).locator('.menu-item .menu-text').allTextContents()).slice(-6)).toEqual(['Add to dictionary', 'Cut', 'Copy', 'Paste', 'Paste as plain text', 'Select all'])
+  await editMenu(page).getByRole('menuitem', { name: 'the', exact: true }).click()
+  await expect(page.locator('.focus-editor .image-caption')).toHaveValue('sweep of the low ')
+  await expect(page.locator('.image-caption-field .spell-miss')).toHaveCount(0)
+  await expect.poll(async () => JSON.stringify(await editorJson(page))).toContain('"caption":"sweep of the low "')
+
+  // The tag field too.
+  await page.getByRole('button', { name: 'Add tag' }).click()
+  await page.keyboard.type('scalpng x')
+  await expect.poll(() => page.locator('.tag-input-field .spell-miss').allTextContents()).toEqual(['scalpng'])
+  await rightClickMiss(page, '.tag-input-field', 'scalpng')
+  await editMenu(page).getByRole('menuitem', { name: 'scalping', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'New tag' })).toHaveValue('scalping x')
+  await page.keyboard.press('Escape')
+
   await app.evaluate(() => (globalThis as unknown as { __tnTest: { shortcuts: { trigger: (id: string) => boolean } } }).__tnTest.shortcuts.trigger('quickNote'))
   const strip = page.locator('.quick-note-input')
   await expect(strip).toBeFocused()
   await page.keyboard.type('fvg filled, waitng for mss ')
   await expect.poll(() => page.locator('.quick-note-field .spell-miss').allTextContents()).toEqual(['waitng'])
+  await rightClickMiss(page, '.quick-note-field', 'waitng')
+  await editMenu(page).getByRole('menuitem', { name: 'waiting', exact: true }).click()
+  await expect(strip).toHaveValue('fvg filled, waiting for mss ')
+  await expect(strip).toBeFocused()
   await page.keyboard.press('Escape')
 })
+
+/** Right-click the underlined `word` of a one-line field. */
+async function rightClickMiss(page: Page, field: string, word: string): Promise<void> {
+  const box = (await page.locator(`${field} .spell-miss`, { hasText: word }).boundingBox())!
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' })
+  await expect(editMenu(page)).toBeVisible()
+}
 
 // ---------------------------------------------------------------- Organize
 
 const ORGANIZED_DUMP = [
-  'NWOG at 6120 was the draw, Asia made EQL at 6098 and London swept them then displacement up leaving a FVG on 5m. I was bullish bias from premarket because PDH 6135 unswept. NY AM killzone was clean, silver bullet 10-11 gave the move.',
-  'Took long at 6104 in the IFVG stop 6096 TP 6130 got stopped out first time lol felt FOMO and re-entered too early. Second entry worked +2R.',
-  "Lesson: don't chase the first push wait for MSS.",
-  'Felt calm after tho.'
+  "NWOG at 6120 was the draw, Asia made EQL at 6098 and London swept them then displacement up leaving a FVG on 5m. Anyway I was bullish bias from premarket because PDH 6135 unswept. Took long at 6104 in the IFVG, stop 6096, TP 6130, got stopped out first time lol. Felt FOMO and re-entered too early. Second entry worked +2R. Lesson: don't chase the first push, wait for MSS. Felt calm after tho. NY AM killzone was clean, silver bullet 10-11 gave the move.",
+  "Ugh my neighbor is drilling again can't focus."
 ]
 const ORGANIZED_TOAST = /^Organized: \d+ fixes, 1 thought regrouped/
 
@@ -395,21 +425,203 @@ test('Organize on a 2,000-word dump feels instant', async () => {
     () =>
       new Promise<number>((resolve) => {
         const root = document.querySelector('.focus-editor .ProseMirror')!
-        const count = root.querySelectorAll(':scope > p').length
         const observer = new MutationObserver(() => {
-          // The thoughts are regrouped into a few paragraphs.
-          if (root.querySelectorAll(':scope > p').length >= count) return
+          // The whole organized note goes in at once, in one change of the page.
+          if (!root.textContent?.startsWith('NWOG at 6120')) return
           observer.disconnect()
           requestAnimationFrame(() => resolve(performance.now() - started))
         })
-        observer.observe(root, { childList: true, subtree: true })
+        observer.observe(root, { childList: true, subtree: true, characterData: true })
         const started = performance.now()
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'O', code: 'KeyO', ctrlKey: true, shiftKey: true, bubbles: true }))
       })
   )
   console.log(`[organize] ${words} words: ${Math.round(ms)} ms from the key press to the organized note on screen`)
   await expect(toast(page)).toContainText(/^Organized: \d+ fixes, \d+ thoughts regrouped/)
-  expect(await editorBody(page).locator(':scope > p').count()).toBeLessThan(10)
+  // Every paragraph is still there; each stray became a paragraph of its own.
+  expect(await editorBody(page).locator(':scope > p').count()).toBeGreaterThan(paragraphs.length)
   // Threshold: well under a second on these slow test machines (a typical run is far quicker).
   expect(ms).toBeLessThan(1000)
+})
+
+// ---------------------------------------------------------------- undo, menus and underlines
+
+test('undoing typing done after Organize leaves the title Organize corrected; undoing Organize itself brings the old title back', async () => {
+  const { page } = ctx
+  await newNote(page)
+  await page.keyboard.type('The open was clean.')
+  await page.locator('.focus-title').fill('londn sesion recap')
+  await organizeButton(page).click()
+  await expect(toast(page)).toContainText('Fixed 2 words')
+  await expect(page.locator('.focus-title')).toHaveValue('London session recap')
+  await expect(editorBody(page)).toHaveText('The open was clean.')
+  await page.keyboard.type(' More.')
+  await page.waitForTimeout(700)
+  await page.keyboard.press('Control+z')
+  await expect(editorBody(page)).toHaveText('The open was clean.')
+  await expect(page.locator('.focus-title')).toHaveValue('London session recap')
+  await page.keyboard.press('Control+y')
+  await expect(editorBody(page)).toHaveText('The open was clean. More.')
+  await expect(page.locator('.focus-title')).toHaveValue('London session recap')
+  // Undo the typing, then Organize itself: now the title goes back; redo brings it again.
+  await page.keyboard.press('Control+z')
+  await page.keyboard.press('Control+z')
+  await expect(page.locator('.focus-title')).toHaveValue('londn sesion recap')
+  await page.keyboard.press('Control+y')
+  await expect(page.locator('.focus-title')).toHaveValue('London session recap')
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+
+  // An empty note: the same.
+  await newNote(page)
+  await page.locator('.focus-title').fill('londn sesion recap')
+  await page.keyboard.press('Control+Shift+O')
+  await expect(page.locator('.focus-title')).toHaveValue('London session recap')
+  await editorBody(page).click()
+  await page.keyboard.type('hello there')
+  await page.keyboard.press('Control+z')
+  await expect(editorBody(page)).toHaveText('')
+  await expect(page.locator('.focus-title')).toHaveValue('London session recap')
+})
+
+test('the message’s Undo is offered only while it can work: it goes once the note is edited or logged', async () => {
+  const { page } = ctx
+  await newNote(page)
+  await page.keyboard.type('teh displacment was clean')
+  await page.keyboard.press('Control+Shift+O')
+  await expect(toast(page)).toContainText('Fixed 2 words')
+  await expect(toast(page).getByRole('button', { name: 'Undo' })).toBeVisible()
+  await page.keyboard.type(' ok')
+  await expect(page.locator('.toast', { hasText: 'Fixed 2 words' })).toHaveCount(0)
+  await expect(editorBody(page)).toHaveText('The displacement was clean. ok')
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+
+  await newNote(page)
+  await page.keyboard.type('teh displacment was clean')
+  await page.keyboard.press('Control+Shift+O')
+  await expect(toast(page).getByRole('button', { name: 'Undo' })).toBeVisible()
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+  await expect(page.locator('.toast', { hasText: 'Fixed 2 words' })).toHaveCount(0)
+})
+
+test('Add to dictionary with a full dictionary says so, and the word stays underlined', async () => {
+  let { page } = ctx
+  await page.evaluate((count) => window.tn.setPreferences({ spellingWords: Array.from({ length: count }, (_, i) => `word${i}x`) }), 500)
+  await restart()
+  page = ctx.page
+  await newNote(page)
+  await page.keyboard.type('the kenzie said so ')
+  await expect.poll(() => underlined(page)).toEqual(['kenzie'])
+  await page.locator('.focus-editor .spell-miss', { hasText: 'kenzie' }).click({ button: 'right' })
+  await editMenu(page).getByRole('menuitem', { name: 'Add to dictionary' }).click()
+  await expect(toast(page)).toContainText('Your dictionary is full (500 words)')
+  await expect.poll(() => underlined(page)).toEqual(['kenzie'])
+  const stored = await ctx.app.evaluate(() => (globalThis as unknown as { __tnTest: { library: { getPreferences: () => { spellingWords: string[] } } } }).__tnTest.library.getPreferences().spellingWords)
+  expect(stored).toHaveLength(500)
+  expect(stored).not.toContain('kenzie')
+})
+
+test('the menu key opens the Edit menu at the caret with the keyboard in it: arrows and Enter choose, Escape gives the text back', async () => {
+  const { page } = ctx
+  await newNote(page)
+  await page.keyboard.type('the displacment was clean')
+  await page.keyboard.press('Home')
+  await page.keyboard.press('Control+ArrowRight')
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('Shift+F10')
+  const menu = editMenu(page)
+  await expect(menu).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'displacement', exact: true })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeHidden()
+  await expect(editorBody(page)).toBeFocused()
+  await page.keyboard.press('Shift+F10')
+  await expect(menu.getByRole('menuitem', { name: 'displacement', exact: true })).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowUp')
+  await page.keyboard.press('Enter')
+  await expect(menu).toBeHidden()
+  await expect(editorBody(page).locator('p')).toHaveText(['the displacement was clean'])
+  await expect(editorBody(page)).toBeFocused()
+  // In the title, the same.
+  await page.locator('.focus-title').fill('londn open')
+  await page.keyboard.press('Home')
+  await page.keyboard.press('ContextMenu')
+  await expect(menu.getByRole('menuitem', { name: 'London', exact: true })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.focus-title')).toHaveValue('London open')
+  await expect(page.locator('.focus-title')).toBeFocused()
+})
+
+test('a misspelled last word is underlined once the keyboard leaves the note text', async () => {
+  const { page } = ctx
+  await newNote(page)
+  await page.keyboard.type('the displacment')
+  await page.waitForTimeout(150)
+  expect(await underlined(page)).toEqual([])
+  await page.locator('.focus-title').click()
+  await page.keyboard.type('x')
+  await expect.poll(() => underlined(page), { timeout: 1000 }).toEqual(['displacment'])
+})
+
+test('title underlines stay under their words when the default font changes, and the wavy line is drawn whole', async () => {
+  const { page } = ctx
+  await newNote(page)
+  await page.locator('.focus-title').fill('a long title about the london session and the ny open with teh sweep of the lows and the displacment ')
+  await editorBody(page).click()
+  await expect.poll(() => page.locator('.focus-title-field .spell-miss').allTextContents()).toEqual(['teh', 'displacment'])
+  /** The copy over the field is laid out exactly as the field: same box, same font. */
+  const layout = (): Promise<string[]> =>
+    page.locator('.focus-title-field').evaluate((field) => {
+      const input = field.querySelector('input')!
+      const mirror = field.querySelector<HTMLElement>('.spell-mirror')!
+      const a = getComputedStyle(input)
+      const b = getComputedStyle(mirror)
+      const box = (element: HTMLElement): string => {
+        const r = element.getBoundingClientRect()
+        return `${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`
+      }
+      const differ: string[] = (['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'paddingLeft'] as const).filter((key) => a[key] !== b[key])
+      return box(input) === box(mirror) ? differ : [...differ, 'box']
+    })
+  expect(await layout()).toEqual([])
+  for (const font of ['Literata', 'JetBrains Mono', 'Hyperlegible']) {
+    await page.keyboard.press('Control+,')
+    await page.getByRole('combobox', { name: 'Default font' }).selectOption({ label: font })
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('settings')).toBeHidden()
+    await expect.poll(layout, { message: font }).toEqual([])
+    await expect(page.locator('.focus-title')).toHaveCSS('font-family', new RegExp(font === 'Hyperlegible' ? 'Hyperlegible' : font))
+  }
+  // The field's copy is clipped at its sides only, so the wave below the words is whole.
+  const overflow = await page.locator('.focus-title-field .spell-mirror').evaluate((mirror) => ({ x: getComputedStyle(mirror).overflowX, y: getComputedStyle(mirror).overflowY }))
+  expect(overflow).toEqual({ x: 'clip', y: 'visible' })
+})
+
+test('the app makes no network requests: Chromium’s own spelling checker downloads no dictionary', async () => {
+  await ctx.quit()
+  removeDataDir(ctx.dataDir)
+  const dataDir = freshDataDir()
+  const netLog = join(dataDir, 'net-log.json')
+  ctx = await launch({ dataDir, args: [`--log-net-log=${netLog}`], size: SIZE })
+  errors = await collectConsoleErrors(ctx.page)
+  const { page, app } = ctx
+  expect(await app.evaluate(({ session }) => ({ enabled: session.defaultSession.isSpellCheckerEnabled(), languages: session.defaultSession.getSpellCheckerLanguages() }))).toEqual({
+    enabled: false,
+    languages: []
+  })
+  await newNote(page)
+  await page.keyboard.type('teh displacment was clean')
+  await page.keyboard.press('Control+Shift+O')
+  await expect(toast(page)).toContainText('Fixed 2 words')
+  await page.waitForTimeout(2000)
+  await ctx.quit()
+  const requests = [...new Set(readFileSync(netLog, 'utf8').match(/https?:\/\/[^"\\\s]+/g) ?? [])]
+  expect(requests).toEqual([])
+  const dictionaries = join(dataDir, 'Dictionaries')
+  expect(existsSync(dictionaries) ? readdirSync(dictionaries) : []).toEqual([])
+  ctx = await launch({ dataDir, size: SIZE })
+  errors = await collectConsoleErrors(ctx.page)
 })

@@ -9,11 +9,18 @@
  *    "many", "far", "small" and "big" only after words like "took" or "was" ("I took to many
  *    trades"; "this applies to many traders" is left alone).
  *  - "the the" -> "the": only for words that are never doubled on purpose.
+ *  - "a IFVG" -> "an IFVG": before a trading code that starts with A, E, I or O, which takes
+ *    "an" however it is read ("a FVG" is left: some read it "a fair value gap").
+ *  - "should of waited" -> "should have waited": a modal, "of", then a past form.
+ *  - "don't want to loose" -> "lose", and "its not" -> "it's not": only next to words that
+ *    leave no doubt.
+ *  - "new York" -> "New York".
  *
  * Nothing else is rewritten: no word order, no style, no "clever" grammar.
  */
-import { matchCase, wordsWithContext, type Speller, type Token } from './spelling'
-import { NEVER_DOUBLED, TOO_AFTER, TOO_NEEDS_CONTEXT, TOO_WORDS } from './wordFixes'
+import { isAllCaps, matchCase, wordsWithContext, type Speller, type Token } from './spelling'
+import { lookupTerm } from './tradingTerms'
+import { IRREGULAR_PAST, ITS_BEFORE, LOSE_AFTER, MODAL_ADVERBS, MODALS, NEVER_DOUBLED, TOO_AFTER, TOO_AFTER_BE, TOO_NEEDS_BE, TOO_NEEDS_CLAUSE_END, TOO_NEEDS_CONTEXT, TOO_WORDS } from './wordFixes'
 
 export interface TextEdit {
   from: number
@@ -57,7 +64,14 @@ export function correctText(text: string, speller: Speller, skip?: (from: number
 
   const spaced = (a: Item, b: Item): boolean => /^ +$/.test(text.slice(a.token.to, b.token.from))
   const isWord = (item: Item | undefined): item is Item => !!item && item.token.kind === 'word' && !item.locked && !item.merged && !item.dropped
-  const lower = (item: Item): string => item.out.toLowerCase()
+  const lower = (item: Item): string => item.out.toLowerCase().replace(/’/g, "'")
+  /** The word after `index` in the same sentence, with only spaces between, or null. */
+  const nextWord = (index: number): Item | null => {
+    const here = items[index]
+    const next = items[index + 1]
+    return here && isWord(next) && spaced(here, next) && next.token.sentence === here.token.sentence ? next : null
+  }
+  const isPastForm = (item: Item | null): boolean => !!item && (/(?:ed|en)$/.test(lower(item)) || IRREGULAR_PAST.has(lower(item)))
   const clauseEndsAfter = (index: number): boolean => {
     const item = items[index]!
     const rest = text.slice(item.token.to)
@@ -84,9 +98,28 @@ export function correctText(text: string, speller: Speller, skip?: (from: number
     // "to early" -> "too early"
     if (lower(a) === 'to' && TOO_WORDS.has(lower(b))) {
       const before = items[i - 1]
-      const afterVerb = isWord(before) && spaced(before, a) && TOO_AFTER.has(lower(before))
-      if (!TOO_NEEDS_CONTEXT.has(lower(b)) || afterVerb || clauseEndsAfter(i + 1)) a.out = matchCase(a.token.text, 'too')
+      const joined = isWord(before) && spaced(before, a)
+      const afterVerb = joined && TOO_AFTER.has(lower(before))
+      if (TOO_NEEDS_BE.has(lower(b))) {
+        if (joined && TOO_AFTER_BE.has(lower(before)) && (!TOO_NEEDS_CLAUSE_END.has(lower(b)) || clauseEndsAfter(i + 1))) a.out = matchCase(a.token.text, 'too')
+      } else if (!TOO_NEEDS_CONTEXT.has(lower(b)) || afterVerb || clauseEndsAfter(i + 1)) a.out = matchCase(a.token.text, 'too')
     }
+    // "a IFVG" -> "an IFVG"
+    if (lower(a) === 'a' && /^[AEIO]/.test(b.out) && isAllCaps(b.out) && lookupTerm(b.out) !== null) {
+      a.out = a.token.text === 'A' && !a.token.sentenceStart ? 'AN' : matchCase(a.token.text, 'an')
+    }
+    // "should of waited" -> "should have waited"
+    if (MODALS.has(lower(a)) && lower(b) === 'of') {
+      const next = nextWord(i + 1)
+      const verb = next && MODAL_ADVERBS.has(lower(next)) ? nextWord(i + 2) : next
+      if (isPastForm(verb)) b.out = matchCase(b.token.text, 'have')
+    }
+    // "want to loose" -> "want to lose"
+    if (lower(b) === 'loose' && LOSE_AFTER.has(lower(a))) b.out = matchCase(b.token.text, 'lose')
+    // "its not" -> "it's not"
+    if (lower(a) === 'its' && ITS_BEFORE.has(lower(b))) a.out = matchCase(a.token.text, "it's")
+    // "new York" -> "New York"
+    if (a.out === 'new' && b.out === 'York') a.out = 'New'
   }
 
   const edits: TextEdit[] = []

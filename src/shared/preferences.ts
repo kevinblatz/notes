@@ -218,7 +218,8 @@ export function sanitizeUserWords(value: unknown): string[] {
     if (typeof raw !== 'string') continue
     const word = raw.trim()
     const key = word.toLowerCase()
-    if (!word || word.length > MAX_USER_WORD_LENGTH || /\s/.test(word) || !/\p{L}/u.test(word) || seen.has(key)) continue
+    // No spaces, and no control or invisible characters (NUL, zero-width spaces, byte-order marks).
+    if (!word || word.length > MAX_USER_WORD_LENGTH || /[\s\p{C}]/u.test(word) || !/\p{L}/u.test(word) || seen.has(key)) continue
     seen.add(key)
     out.push(word)
     if (out.length >= MAX_USER_WORDS) break

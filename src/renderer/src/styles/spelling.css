@@ -29,11 +29,13 @@
   display: block;
   min-width: 0;
 }
+/* Clipped at the field's sides only: the wavy line may hang just below the field's box. */
 .spell-mirror {
   position: absolute;
   display: flex;
   align-items: center;
-  overflow: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
   margin: 0;
   border-color: transparent;
   background: none;

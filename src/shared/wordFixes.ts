@@ -33,7 +33,10 @@ export const SLIPS: Readonly<Record<string, string>> = {
   completly: 'completely', enviroment: 'environment', existance: 'existence', foward: 'forward', goverment: 'government',
   happend: 'happened', immediatly: 'immediately', independant: 'independent', neccessary: 'necessary', noticable: 'noticeable',
   occassion: 'occasion', persistant: 'persistent', posession: 'possession', prefered: 'preferred', recomend: 'recommend',
-  refered: 'referred', relevent: 'relevant', succesful: 'successful', suprise: 'surprise', truely: 'truly', writting: 'writing'
+  refered: 'referred', relevent: 'relevant', succesful: 'successful', suprise: 'surprise', truely: 'truly', writting: 'writing',
+  fourty: 'forty', loosing: 'losing', carefull: 'careful', successfull: 'successful', helpfull: 'helpful', thankfull: 'thankful',
+  stressfull: 'stressful', gratefull: 'grateful', mindfull: 'mindful', hopefull: 'hopeful', fearfull: 'fearful', painfull: 'painful',
+  wonderfull: 'wonderful', beautifull: 'beautiful', powerfull: 'powerful', peacefull: 'peaceful', forcefull: 'forceful'
 }
 
 /** A few shorthands with only one meaning in a trading journal. "u", "ur", "rn" and the like stay as typed. */
@@ -63,9 +66,10 @@ export const ENGLISH_EXTRAS: readonly string[] = [
   'Christmas', 'Easter', 'Thanksgiving', 'Halloween',
   'America', 'American', 'Americans', 'Europe', 'European', 'Tokyo', 'Sydney', 'Chicago', 'England', 'English', 'Britain',
   'British', 'Japan', 'Japanese', 'China', 'Chinese', 'Germany', 'German', 'Canada', 'Australia', 'York', 'US', 'USA',
-  'UK', 'EU', 'Fed', 'Powell', 'Yellen', 'TradingView', 'Tradovate', 'NinjaTrader', 'Topstep', 'Discord', 'YouTube',
+  'UK', 'EU', 'Fed', 'Powell', 'Yellen', 'Discord', 'YouTube', 'TikTok', 'Reddit', 'Instagram', 'MacBook', 'iPhone', 'iPad',
   'Twitter', 'Google', 'Windows', 'Chrome', 'Excel', 'Dow', 'Jones', 'Russell', 'Bitcoin', 'Ethereum', 'God',
-  'timeframe', 'timeframes', 'offline', 'app', 'pre', 'un', 'co'
+  'timeframe', 'timeframes', 'offline', 'app', 'apps', 'pre', 'un', 'co', 'intro', 'intros', 'wifi', 'admin', 'config', 'tech',
+  'breathwork', 'email', 'emails', 'online', 'login', 'podcast', 'podcasts', 'livestream', 'screenshot', 'screenshots', 'smartphone'
 ]
 
 /** "the the" -> "the". Only words that are never doubled on purpose ("had had", "that that" are fine English). */
@@ -75,7 +79,12 @@ export const NEVER_DOUBLED: ReadonlySet<string> = new Set(['the', 'a', 'an', 'to
  * "to early" -> "too early". Only words that cannot follow "to" as a verb ("to close", "to
  * slow down" and "to high" are left alone).
  */
-export const TOO_WORDS: ReadonlySet<string> = new Set(['early', 'late', 'soon', 'fast', 'quick', 'quickly', 'much', 'big', 'tight', 'wide', 'risky', 'greedy', 'aggressive', 'aggressively', 'impatient', 'eager', 'small', 'many', 'far'])
+export const TOO_WORDS: ReadonlySet<string> = new Set([
+  'early', 'late', 'soon', 'fast', 'quick', 'quickly', 'much', 'big', 'tight', 'wide', 'risky', 'greedy', 'aggressive', 'aggressively',
+  'impatient', 'eager', 'small', 'many', 'far', 'scared', 'nervous', 'tired', 'emotional', 'confident', 'anxious', 'afraid', 'excited',
+  'stressed', 'frustrated', 'distracted', 'hesitant', 'cautious', 'careful', 'lazy', 'bored', 'worried', 'fearful', 'overconfident',
+  'slow', 'high', 'low'
+])
 
 /**
  * "to many" is "too many" only after words like these ("I took to many trades"); otherwise
@@ -88,6 +97,38 @@ export const TOO_AFTER: ReadonlySet<string> = new Set([
 ])
 /** Of the TOO_WORDS, the ones that need a word from TOO_AFTER before "to" (or a full stop after them). */
 export const TOO_NEEDS_CONTEXT: ReadonlySet<string> = new Set(['many', 'far', 'small', 'big'])
+
+/**
+ * Of the TOO_WORDS, the ones that are also verbs or places to go ("to slow down", "went to
+ * high of day"): only after "was", "is", "got" and the like, and "high" and "low" only at the
+ * end of a clause too ("my stop was to high." -> "too high").
+ */
+export const TOO_AFTER_BE: ReadonlySet<string> = new Set(['was', 'were', 'is', 'are', 'am', 'be', 'been', 'being', "it's", "i'm", 'got', 'get', 'gets', 'getting', 'way', 'felt', 'feel', 'feeling', 'seemed', 'looked'])
+export const TOO_NEEDS_BE: ReadonlySet<string> = new Set(['slow', 'high', 'low'])
+export const TOO_NEEDS_CLAUSE_END: ReadonlySet<string> = new Set(['high', 'low'])
+
+/** "should of waited" -> "should have waited": the modals "of" is a slip for "have" after. */
+export const MODALS: ReadonlySet<string> = new Set(['should', 'could', 'would', 'must', 'might', "shouldn't", "couldn't", "wouldn't", "mustn't"])
+/** Words that may stand between "should of" and the verb: "should of just waited". */
+export const MODAL_ADVERBS: ReadonlySet<string> = new Set(['just', 'really', 'probably', 'definitely', 'never', 'not', 'easily', 'simply', 'actually', 'already', 'totally', 'honestly'])
+/** Past forms that do not end in -ed or -en: "could of been", "should of took". */
+export const IRREGULAR_PAST: ReadonlySet<string> = new Set([
+  'been', 'had', 'done', 'gone', 'got', 'took', 'made', 'held', 'run', 'ran', 'sat', 'let', 'put', 'cut', 'hit', 'set', 'kept', 'left',
+  'lost', 'won', 'sold', 'bought', 'thought', 'felt', 'told', 'said', 'went', 'came', 'come', 'seen', 'saw', 'known', 'knew', 'did',
+  'caught', 'brought', 'stood', 'sent', 'spent', 'built', 'meant', 'paid', 'slept', 'stuck', 'struck', 'sold', 'quit', 'shut', 'read'
+])
+
+/** "loose" is "lose" after these: "don't want to loose", "if I loose 2 trades". */
+export const LOSE_AFTER: ReadonlySet<string> = new Set([
+  'to', 'i', 'you', 'we', 'they', 'will', 'might', 'could', 'would', 'should', 'can', 'may', 'must', 'gonna', 'wanna', "don't", 'dont',
+  "didn't", 'didnt', "won't", 'wont', "can't", 'cant', 'not', 'never', "i'll", 'ill', "we'll", "you'll", 'always', 'often', 'usually'
+])
+
+/** "its" is "it's" before these: "its not the setup", "its been a week". */
+export const ITS_BEFORE: ReadonlySet<string> = new Set([
+  'not', 'been', 'gonna', 'going', 'a', 'an', 'the', 'ok', 'okay', 'fine', 'just', 'over', 'so', 'really', 'still', 'always', 'never',
+  'too', 'what', 'done', 'like', 'because', 'bc', 'about', 'getting', 'hard', 'easy', 'crazy', 'funny', 'weird', 'insane', 'wild'
+])
 
 /** Words that end a sentence-like chunk without ending a sentence: "e.g. this", "vs. that". */
 export const ABBREVIATIONS: ReadonlySet<string> = new Set(['e.g', 'i.e', 'eg', 'ie', 'vs', 'approx', 'mr', 'mrs', 'ms', 'dr', 'st', 'cf', 'etc'])

@@ -120,6 +120,8 @@ test('no insertion line anywhere over empty board space, in either layout', asyn
   })
   for (const width of [960, 680]) {
     await setWindowSize(app, page, width, 1000)
+    // Measure the settled layout: the notes' arrival and re-layout animations have finished.
+    await expect.poll(() => runningAnimations(page)).toEqual([])
     const a = (await noteByText(page, 'Alpha note').boundingBox())!
     const b = (await noteByText(page, 'Bravo note').boundingBox())!
     const points = [

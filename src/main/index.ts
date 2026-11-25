@@ -83,6 +83,11 @@ async function main(): Promise<void> {
   // Nothing in this app needs camera, microphone, location, notifications and so on.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
+  // The app has its own spelling checker (src/shared/spelling.ts). Chromium's is switched off
+  // for the whole session, not only in the page (webPreferences.spellcheck), and given no
+  // languages, so it never downloads a dictionary: the app makes no network requests.
+  session.defaultSession.setSpellCheckerEnabled(false)
+  if (process.platform !== 'darwin') session.defaultSession.setSpellCheckerLanguages([])
   handleAttachmentRequests(lib)
 
   /** A desktopCapturer source as a test describes it: a known picture under a known title. */

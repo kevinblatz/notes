@@ -4,8 +4,8 @@
  *
  * Underlines are ProseMirror decorations, so the note's stored content never carries them.
  * Only the text blocks a change touched are checked again, and the word the caret is still in
- * is left alone until the caret leaves it, as a native spelling checker does. Nothing runs
- * while nothing changes.
+ * is left alone until the caret leaves it (or the keyboard leaves the note text), as a native
+ * spelling checker does. Nothing runs while nothing changes.
  */
 import { Extension } from '@tiptap/core'
 import type { Node as PMNode } from '@tiptap/pm/model'
@@ -122,8 +122,18 @@ function everything(doc: PMNode, value: SpellState, caret: number | null): Spell
   return { ...value, decorations: set, pending }
 }
 
+/** What a transaction can tell the plugin: a new checker or switch, or that the text lost the keyboard. */
+type SpellMeta = Partial<Pick<SpellState, 'speller' | 'enabled'>> & { blurred?: boolean }
+
 function applySpelling(tr: Transaction, value: SpellState, oldState: EditorState, newState: EditorState): SpellState {
-  const meta = tr.getMeta(spellKey) as Partial<Pick<SpellState, 'speller' | 'enabled'>> | undefined
+  const meta = tr.getMeta(spellKey) as SpellMeta | undefined
+  if (meta?.blurred) {
+    // The keyboard left the note text: the word that was being typed is finished.
+    if (value.pending === null || !value.enabled || !value.speller.ready) return value
+    const node = value.pending < tr.doc.content.size ? tr.doc.nodeAt(value.pending) : null
+    if (!node?.isTextblock) return { ...value, pending: null }
+    return { ...value, decorations: recheck(tr.doc, value.decorations, value.pending, value.pending + node.nodeSize, value, null).set, pending: null }
+  }
   if (meta) return everything(newState.doc, { ...value, ...meta }, null)
   if (!value.enabled || !value.speller.ready) return value
   let decorations = value.decorations.map(tr.mapping, tr.doc)
@@ -162,7 +172,15 @@ export function spellingExtension(initial: () => { speller: Speller; enabled: bo
             init: (_config, state) => everything(state.doc, { ...initial(), decorations: DecorationSet.empty, pending: null }, null),
             apply: applySpelling
           },
-          props: { decorations: (state) => spellKey.getState(state)?.decorations }
+          props: {
+            decorations: (state) => spellKey.getState(state)?.decorations,
+            handleDOMEvents: {
+              blur: (view) => {
+                if (spellKey.getState(view.state)?.pending != null) view.dispatch(view.state.tr.setMeta(spellKey, { blurred: true }).setMeta('addToHistory', false))
+                return false
+              }
+            }
+          }
         }),
         new Plugin<DecorationSet>({
           key: flashKey,

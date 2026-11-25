@@ -4,30 +4,34 @@
  * the note keeps its own shape and wording, it is only fixed and, where a thought wandered off
  * and came back, put back together.
  *
- *  1. Fix words (see autocorrect.ts), keeping bold, links, highlights and colours.
+ *  1. Fix words (see autocorrect.ts), keeping bold, links, highlights and colours, in the text
+ *     and in picture captions.
  *  2. Fix punctuation: a capital at the start of each sentence, single spaces, no space before a
  *     comma or full stop and one after it, a full stop at the end of a sentence-like line of a
- *     paragraph, a long run-on line without any punctuation split into sentences at a few
+ *     paragraph, a long run-on sentence without any punctuation split into sentences at a few
  *     strong cues ("... into the FVG then I waited ..." -> "... into the FVG. Then I waited ..."),
- *     and a colon after a bare label ("lesson dont chase" -> "Lesson: don't chase"). Headings,
- *     list items, session log lines and code get none of the sentence fixes.
- *  3. Regroup thoughts: within a run of plain paragraphs, every sentence is given a topic (the
- *     setup: plan, bias and what the market did; trades; mindset; lessons and rules). When the
- *     writing strays to another topic and later comes back, the sentences about the same topic
- *     are put back together: one paragraph per topic, topics in the order they first appear,
- *     sentences in their original order within a topic. A sentence with no clear topic, or one
- *     that shares an ICT term or a price with the sentence before it, stays with that sentence.
- *     When nothing strayed, the paragraphs stay exactly as they were.
+ *     a colon after a bare label ("lesson dont chase" -> "Lesson: don't chase") and a comma
+ *     before its second instruction. Headings, list items, session log lines and code get none
+ *     of the sentence fixes.
+ *  3. Put a stray back: when the writing leaves a thought for a sentence or two and comes back
+ *     to it ("price swept the low. ugh my neighbor is drilling again. anyway the displacement
+ *     left a FVG ..."), the stray moves out, as a paragraph of its own, after the paragraph the
+ *     writing came back in. Deliberately narrow (see `regroupPlan`): only close by, only with an
+ *     explicit return ("anyway", "back to ...") or the same level named again, and never where
+ *     a story is told in order (trade, reaction, trade). Everything else keeps its order and
+ *     the user's paragraphs stay exactly as they were.
  *  4. Never moved, never merged: headings, lists, checklists, quotes, code, pictures and drawings,
- *     session log lines ("09:31:05 — text"), and a label line ("Lessons:") with the lines under
- *     it. Each of them ends a run of paragraphs, so everything keeps its place around them.
+ *     session log lines ("09:31:05 — text"), lines broken with Shift+Enter, and a label line
+ *     ("Lessons:") with the lines under it. Each of them ends a run of paragraphs, so everything
+ *     keeps its place around them, and so does a paragraph that starts a new day ("Tuesday ...").
  *
  * Nothing is ever lost or duplicated, and organizing an organized note changes nothing: a
  * regrouping is only made when a second look at the result would leave it as it is.
  */
 import { applyTextEdits, correctText, type TextEdit } from './autocorrect'
 import { capitalise, isAllCaps, isCapitalised, letterCount, TIME_RE, tokenize, type Speller, type Token } from './spelling'
-import { lookupTerm } from './tradingTerms'
+import { lookupTerm, TERMS } from './tradingTerms'
+import { IRREGULAR_PAST } from './wordFixes'
 import type { RichDoc, RichMark, RichNode } from './types'
 
 export type TopicKey = 'setup' | 'trades' | 'mindset' | 'lessons'
@@ -73,11 +77,16 @@ interface Cell {
   atom?: RichNode
 }
 
+/**
+ * One cell per UTF-16 code unit, the unit every text offset here counts in (an emoji is two
+ * cells, its two halves joined back together by fromCells), so a cell index is a text offset.
+ */
 function toCells(nodes: RichNode[] | undefined): Cell[] {
   const cells: Cell[] = []
   for (const node of nodes ?? []) {
     if (node.type === 'text') {
-      for (const ch of node.text ?? '') cells.push({ ch, marks: node.marks })
+      const value = node.text ?? ''
+      for (let i = 0; i < value.length; i++) cells.push({ ch: value[i]!, marks: node.marks })
     } else cells.push({ ch: node.type === 'hardBreak' ? '\n' : '￼', marks: undefined, atom: node })
   }
   return cells
@@ -158,7 +167,7 @@ function editCells(cells: Cell[], edits: readonly TextEdit[], flash: boolean): C
       marks = source?.filter((mark) => !LOCKED_MARKS.has(mark.type) && mark.type !== FIX_MARK)
     }
     if (flash && edit.insert) marks = fixMarks(marks?.filter((mark) => mark.type !== FIX_MARK))
-    for (const ch of edit.insert) out.push({ ch, marks })
+    for (let i = 0; i < edit.insert.length; i++) out.push({ ch: edit.insert[i]!, marks })
     cursor = edit.to
   }
   out.push(...cells.slice(cursor))
@@ -197,13 +206,16 @@ function matchEdits(text: string, pattern: RegExp, insert: string, locked: (from
 
 /**
  * Spacing: no spaces at the start or end of a line, single spaces between words, none before
- * , . ; : ! ? and one after a comma or semicolon that runs into the next word.
+ * , . ; : ! ? and one after a comma or semicolon that runs into the next word; a doubled
+ * comma or semicolon made single.
  */
 function tidySpacing(cells: Cell[], counter: Counter): Cell[] {
   cells = pass(cells, (text, locked) => [...matchEdits(text, /(?<=^|\n)[ \t]+/g, '', locked), ...matchEdits(text, /[ \t]+(?=\n|$)/g, '', locked)].sort((a, b) => a.from - b.from), counter)
   cells = pass(cells, (text, locked) => matchEdits(text, /[ \t]{2,}|\t/g, ' ', locked), counter)
   cells = pass(cells, (text, locked) => matchEdits(text, /(?<=\p{L}) +(?=[,;]|[.:!?](?:\s|$))/gu, '', locked), counter)
   cells = pass(cells, (text, locked) => matchEdits(text, /(?<=\p{L}[,;])(?=\p{L})/gu, ' ', locked), counter)
+  // "ok,, so" -> "ok, so"
+  cells = pass(cells, (text, locked) => [...matchEdits(text, /,{2,}/g, ',', locked), ...matchEdits(text, /;{2,}/g, ';', locked)].sort((a, b) => a.from - b.from), counter)
   return cells
 }
 
@@ -221,7 +233,16 @@ function sentenceSpaceEdits(text: string, tokens: Token[], locked: (from: number
   return edits
 }
 
-/** A capital at the start of each sentence (and each log line after its time). */
+/** Words up to this commonness level are everyday English ("am", "spy"); "es" (the letter) is rarer. */
+const COMMON_LEVEL = 35
+/** Codes that are also English abbreviations: "dr" and "mt" starting a sentence are "Dr" and "Mt". */
+const START_AS_WORD = new Set(['dr', 'drs', 'mt', 'mts'])
+
+/**
+ * A capital at the start of each sentence (and each log line after its time). A trading code
+ * that is not an English word is written in its own capitals there: "es was slow" -> "ES was
+ * slow", never "Es".
+ */
 function capitalEdits(tokens: Token[], speller: Speller, locked: (from: number, to: number) => boolean): TextEdit[] {
   const edits: TextEdit[] = []
   for (const token of tokens) {
@@ -230,6 +251,13 @@ function capitalEdits(tokens: Token[], speller: Speller, locked: (from: number, 
     if (first === first.toUpperCase() || locked(token.from, token.to)) continue
     // Words with their own capitals (iPhone) and the user's own words stay as typed.
     if (/\p{Lu}/u.test(token.text.slice(1)) || speller.isUserWord(token.text)) continue
+    const lower = token.text.toLowerCase()
+    const term = TERMS.get(lower)
+    // Codes that are also common words ("am", "spy") are capitalised as words.
+    if (term && term.ambiguous && !START_AS_WORD.has(lower) && (speller.dictionary?.level(lower) ?? Infinity) > COMMON_LEVEL) {
+      edits.push({ from: token.from, to: token.to, insert: term.canonical })
+      continue
+    }
     edits.push({ from: token.from, to: token.from + 1, insert: first.toUpperCase() })
   }
   return edits
@@ -273,11 +301,31 @@ function fullStopEdits(text: string, tokens: Token[], locked: (from: number, to:
   return edits
 }
 
-/** Words a run-on line may be split before ("... first push then wait ..."). */
+/** Words a run-on sentence may be split before ("... first push then wait ..."). */
 const RUN_ON_BEFORE = new Set(['then', 'but', 'also', 'anyway', 'btw', 'so'])
 const RUN_ON_AFTER = new Set(['lol', 'lmao', 'haha'])
 const RUN_ON_MIN_WORDS = 20
 const RUN_ON_MIN_PART = 5
+/**
+ * After these a cue is not the start of a new sentence: "swept at 11:15", "to form and then",
+ * "the so-called". A sentence never ends on a preposition, a conjunction or an article.
+ */
+const WEAK_BEFORE = new Set([
+  'at', 'by', 'before', 'after', 'around', 'until', 'til', 'till', 'from', 'to', 'since', 'and', 'or', 'but', 'if', 'the', 'a', 'an', 'of',
+  'for', 'with', 'in', 'on', 'into', 'onto', 'than', 'about', 'near', 'like', 'as', 'when', 'once', 'because', 'bc', 'is', 'was', 'were',
+  'be', 'just', 'even', 'only', 'not', 'my', 'your', 'our', 'their', 'his', 'her', 'its', 'this', 'that'
+])
+/** "so" starts a sentence only before these ("so the bias was right", "so I waited"), not in "so annoying". */
+const SO_STARTS = new Set(['i', "i'm", 'im', 'we', 'you', 'they', 'he', 'she', 'the', 'it', "it's", 'its', 'that', 'this', 'there', 'now', 'then', 'my', 'price', 'market', 'today', 'overall', 'basically', 'yeah', 'ok', 'okay'])
+const COMMON_VERBS = new Set(['is', 'was', 'are', 'were', 'has', 'have', 'had', 'gets', 'goes', 'takes', 'comes', 'runs', 'ran', 'broke', 'gave', 'saw', 'dumped', 'ripped', 'swept', 'tapped', 'wicked'])
+/** A cue followed by a verb is inside its clause: "price then reversed", "I also took a short". */
+const isVerbLike = (lower: string): boolean => /ed$/.test(lower) || IRREGULAR_PAST.has(lower) || COMMON_VERBS.has(lower)
+/** A sentence that starts with these runs on to its "then": "if price takes the PDH then ...". */
+const CONDITIONAL_STARTS = new Set(['if', 'when', 'once', 'whenever', 'unless', 'after', 'as', 'until', 'before'])
+/** "stop 6096", "TP 6130": a trade's levels, set off with commas in a run-on sentence. */
+const LEVEL_WORDS = new Set(['stop', 'sl', 'tp', 'tp1', 'tp2', 'tp3', 'target', 'tgt', 'targets'])
+/** After a trade's levels, these carry on the same clause: no comma before them. */
+const SAME_CLAUSE = new Set([...WEAK_BEFORE, ...RUN_ON_BEFORE, ...RUN_ON_AFTER, 'which', 'that', 'where', 'while', 'plus', 'then'])
 
 /** The edit that ends a sentence just before `at` (the start of the next one), if one is needed. */
 function sentenceBreakEdit(text: string, at: number, locked: (from: number, to: number) => boolean): TextEdit | null {
@@ -290,49 +338,132 @@ function sentenceBreakEdit(text: string, at: number, locked: (from: number, to: 
   return { from: end, to: end, insert: '.' }
 }
 
+/** Tokens grouped by the sentence they are in. */
+function bySentence(tokens: Token[]): Token[][] {
+  const out: Token[][] = []
+  for (const token of tokens) {
+    const last = out[out.length - 1]
+    if (last && last[0]!.sentence === token.sentence) last.push(token)
+    else out.push([token])
+  }
+  return out
+}
+
 /**
- * A long line written without any sentence punctuation is split into sentences, conservatively:
- * only at "then", "but", "also", "so", "anyway", "btw" or a clock time, or after "lol", and only
- * where both parts are at least five words long.
+ * A long sentence written without any punctuation inside it (20 words or more) is split into
+ * sentences, conservatively: only at "then", "but", "also", "so", "anyway", "btw" or a clock
+ * time, or after "lol", where both parts are at least five words long, and never after a
+ * preposition, a conjunction or an article ("swept at 11:15", "and then") or at the "then" of
+ * an "if ... then". "and then" gets a comma instead. A trade's levels in it are set off with
+ * commas: "took long at 6104 in the IFVG stop 6096 TP 6130 got stopped out" -> "took long at
+ * 6104 in the IFVG, stop 6096, TP 6130, got stopped out".
  */
 function runOnEdits(text: string, tokens: Token[], locked: (from: number, to: number) => boolean): TextEdit[] {
   const edits: TextEdit[] = []
   for (const { start, line } of linesOf(text)) {
-    if (LOG_LINE.test(line) || /[.!?;]/.test(line.replace(/[.!?]+\s*$/, ''))) continue
+    if (LOG_LINE.test(line)) continue
     const end = start + line.length
-    const inside = tokens.filter((token) => token.from >= start && token.to <= end)
-    const total = inside.filter((token) => token.kind === 'word').length
-    if (total < RUN_ON_MIN_WORDS) continue
-    let wordsBefore = 0
-    let seen = 0
-    inside.forEach((token, index) => {
-      const lower = token.text.toLowerCase()
-      const remaining = total - seen
-      const cueBefore = (token.kind === 'word' && RUN_ON_BEFORE.has(lower)) || (token.kind === 'protected' && TIME_RE.test(token.text))
-      if (cueBefore && wordsBefore >= RUN_ON_MIN_PART && remaining >= RUN_ON_MIN_PART) {
-        const edit = sentenceBreakEdit(text, token.from, locked)
-        if (edit) edits.push(edit)
-        wordsBefore = 0
-      }
-      if (token.kind === 'word') {
-        wordsBefore++
-        seen++
-      }
-      const next = inside[index + 1]
-      if (token.kind === 'word' && RUN_ON_AFTER.has(lower) && next && wordsBefore >= RUN_ON_MIN_PART && total - seen >= RUN_ON_MIN_PART) {
-        const edit = sentenceBreakEdit(text, next.from, locked)
-        if (edit) edits.push(edit)
-        wordsBefore = 0
-      }
-    })
+    for (const inside of bySentence(tokens.filter((token) => token.from >= start && token.to <= end))) {
+      // Any punctuation between its words: the writer punctuated it, it is left as it is.
+      const punctuated = inside.some((token, index) => {
+        const previous = inside[index - 1]
+        if (!previous) return false
+        const gap = text.slice(previous.to, token.from)
+        return /[^\s]/.test(gap) && !(gap === '-' && previous.hyphenPart && token.hyphenPart)
+      })
+      if (punctuated) continue
+      const total = inside.filter((token) => token.kind === 'word').length
+      if (total < RUN_ON_MIN_WORDS) continue
+      const lowerAt = (index: number): string => (inside[index]?.kind === 'word' ? inside[index]!.text.toLowerCase() : '')
+      const conditional = CONDITIONAL_STARTS.has(lowerAt(inside.findIndex((token) => token.kind === 'word')))
+      let wordsBefore = 0
+      let seen = 0
+      let pricesSeen = 0
+      inside.forEach((token, index) => {
+        const lower = token.text.toLowerCase()
+        const remaining = total - seen
+        const previous = lowerAt(index - 1)
+        const isCue = (token.kind === 'word' && RUN_ON_BEFORE.has(lower)) || (token.kind === 'protected' && TIME_RE.test(token.text))
+        const following = lowerAt(index + 1)
+        const weak =
+          WEAK_BEFORE.has(previous) ||
+          (lower === 'then' && conditional) ||
+          (lower === 'so' && !SO_STARTS.has(following.replace(/’/g, "'"))) ||
+          ((lower === 'then' || lower === 'also' || lower === 'but') && isVerbLike(following))
+        if (isCue && wordsBefore >= RUN_ON_MIN_PART && remaining >= RUN_ON_MIN_PART) {
+          if (!weak) {
+            const edit = sentenceBreakEdit(text, token.from, locked)
+            if (edit) edits.push(edit)
+            wordsBefore = 0
+          } else if (lower === 'then' && previous === 'and' && !conditional && wordsBefore - 1 >= RUN_ON_MIN_PART) {
+            // "... for the setup to form and then at 10:40 ..." -> "... to form, and then at 10:40 ..."
+            const before = inside[index - 2]
+            if (before && !locked(before.to - 1, before.to)) edits.push({ from: before.to, to: before.to, insert: ',' })
+            wordsBefore = 0
+          }
+        }
+        // A trade's levels: ", stop 6096, TP 6130," after an entry price.
+        const next = inside[index + 1]
+        if (token.kind === 'word' && LEVEL_WORDS.has(lower) && next?.kind === 'protected' && PRICE_RE.test(next.text) && pricesSeen > 0) {
+          const prev = inside[index - 1]
+          const afterLevel = prev && (PRICE_RE.test(prev.text) || (prev.kind === 'word' && lookupTerm(prev.text) !== null && !LEVEL_WORDS.has(prev.text.toLowerCase())))
+          if (prev && afterLevel && !locked(prev.to - 1, prev.to)) edits.push({ from: prev.to, to: prev.to, insert: ',' })
+          const after = inside[index + 2]
+          const afterLower = after?.text.toLowerCase() ?? ''
+          if (after && after.kind === 'word' && !LEVEL_WORDS.has(afterLower) && !SAME_CLAUSE.has(afterLower) && !locked(next.to - 1, next.to)) {
+            edits.push({ from: next.to, to: next.to, insert: ',' })
+          }
+        }
+        if (token.kind === 'protected' && PRICE_RE.test(token.text)) pricesSeen++
+        if (token.kind === 'word') {
+          wordsBefore++
+          seen++
+        }
+        if (token.kind === 'word' && RUN_ON_AFTER.has(lower) && next && wordsBefore >= RUN_ON_MIN_PART && total - seen >= RUN_ON_MIN_PART) {
+          const edit = sentenceBreakEdit(text, next.from, locked)
+          if (edit) edits.push(edit)
+          wordsBefore = 0
+        }
+      })
+    }
   }
-  return edits.sort((a, b) => a.from - b.from)
+  // One edit per place (a comma and a full stop at the same spot: the full stop).
+  const sorted = edits.sort((a, b) => a.from - b.from || (a.insert === '.' ? -1 : 1))
+  return sorted.filter((edit, index) => index === 0 || edit.from !== sorted[index - 1]!.from)
 }
 
 /** A statement that starts like an instruction to oneself is a rule. */
 const IMPERATIVE_STARTS = new Set(["don't", 'dont', 'never', 'always', 'wait', 'only', 'stop', 'avoid', 'trust', 'remember', 'stay', 'keep', 'no', 'do', 'be', 'let'])
 /** Labels written without a colon before an instruction: "lesson dont chase" -> "Lesson: don't chase". */
 const BARE_LABELS = new Set(['lesson', 'lessons', 'rule', 'rules', 'reminder', 'takeaway'])
+
+/** A second instruction after a label: "Lesson: don't chase the first push, wait for MSS". */
+const SECOND_INSTRUCTIONS = new Set(['wait', "don't", 'dont', 'never', 'always', 'take', 'trust', 'avoid', 'walk', 'let'])
+/** Words after which a second instruction is not one: "need to wait", "and wait", "just wait". */
+const INSTRUCTION_JOINED = new Set(['to', 'and', 'or', 'but', 'then', 'i', 'you', 'we', 'just', 'not', 'will', 'would', 'should', 'can', 'could', 'must', 'gonna', 'wanna', 'the', 'a', 'an', 'for', 'of', 'in', 'on', 'at', 'with', 'never', 'always', "don't", 'dont', 'only'])
+
+/**
+ * A label sentence with two instructions and no punctuation between them gets a comma before
+ * the second: "Lesson: don't chase the first push wait for MSS" -> "... first push, wait for MSS".
+ */
+function labelCommaEdits(text: string, tokens: Token[], locked: (from: number, to: number) => boolean): TextEdit[] {
+  const edits: TextEdit[] = []
+  for (const sentence of bySentence(tokens)) {
+    const [label, first] = sentence
+    if (!label || !first || label.kind !== 'word' || first.kind !== 'word' || !BARE_LABELS.has(label.text.toLowerCase())) continue
+    if (!/^:\s+$/.test(text.slice(label.to, first.from)) || !IMPERATIVE_STARTS.has(first.text.toLowerCase().replace(/’/g, "'"))) continue
+    if (sentence.slice(2).some((token, index) => /[^\s]/.test(text.slice(sentence[index + 1]!.to, token.from)))) continue
+    for (let i = 4; i < sentence.length; i++) {
+      const word = sentence[i]!
+      const before = sentence[i - 1]!
+      if (word.kind !== 'word' || !SECOND_INSTRUCTIONS.has(word.text.toLowerCase().replace(/’/g, "'"))) continue
+      if (before.kind !== 'word' || INSTRUCTION_JOINED.has(before.text.toLowerCase().replace(/’/g, "'")) || locked(before.to - 1, before.to)) break
+      edits.push({ from: before.to, to: before.to, insert: ',' })
+      break
+    }
+  }
+  return edits
+}
 
 function labelColonEdits(text: string, tokens: Token[], locked: (from: number, to: number) => boolean): TextEdit[] {
   const edits: TextEdit[] = []
@@ -360,6 +491,7 @@ function polishInline(nodes: RichNode[] | undefined, speller: Speller, sentences
   if (sentences) {
     cells = pass(cells, (text, locked) => runOnEdits(text, tokenize(text), locked), counter)
     cells = pass(cells, (text, locked) => labelColonEdits(text, tokenize(text), locked), counter)
+    cells = pass(cells, (text, locked) => labelCommaEdits(text, tokenize(text), locked), counter)
   }
   cells = pass(cells, (text, locked) => capitalEdits(tokenize(text), speller, locked), counter)
   if (sentences) cells = pass(cells, (text, locked) => fullStopEdits(text, tokenize(text), locked), counter)
@@ -368,10 +500,21 @@ function polishInline(nodes: RichNode[] | undefined, speller: Speller, sentences
 
 const TEXT_BLOCKS = new Set(['paragraph', 'heading'])
 
-/** Fix every text block. Code is left exactly as it is. */
+/** A picture's caption gets its words fixed (nothing else: it is a label, not a sentence). */
+function fixCaption(node: RichNode, speller: Speller, counter: Counter): RichNode {
+  const caption = node.attrs?.caption
+  if (typeof caption !== 'string' || !caption.trim()) return node
+  const correction = correctText(caption, speller)
+  if (correction.fixed === 0) return node
+  counter.words += correction.fixed
+  return { ...node, attrs: { ...node.attrs, caption: applyTextEdits(caption, correction.edits) } }
+}
+
+/** Fix every text block and picture caption. Code is left exactly as it is. */
 function fixNodes(nodes: RichNode[] | undefined, speller: Speller, inList: boolean, counter: Counter): RichNode[] | undefined {
   return nodes?.map((node) => {
     if (node.type === 'codeBlock') return node
+    if (node.type === 'noteImage') return fixCaption(node, speller, counter)
     if (TEXT_BLOCKS.has(node.type)) return withInline(node, fromCells(polishInline(node.content, speller, node.type === 'paragraph' && !inList, counter)))
     if (!node.content) return node
     return { ...node, content: fixNodes(node.content, speller, inList || node.type === 'listItem' || node.type === 'taskItem', counter) }
@@ -550,26 +693,165 @@ export function topicsOf(texts: readonly string[]): Array<TopicKey | null> {
   return topics.map((topic) => topic ?? first)
 }
 
+// ---------------------------------------------------------------- strays
+
+/**
+ * The three threads a journal entry runs on. A thought strays when it leaves one for another
+ * and comes back: the setup and the trades are one thread (the market), feelings another.
+ */
+type Thread = 'market' | 'mind' | 'lessons'
+const THREAD_OF: Record<TopicKey, Thread> = { setup: 'market', trades: 'market', mindset: 'mind', lessons: 'lessons' }
+const threadOf = (topic: TopicKey | null): Thread | null => (topic === null ? null : THREAD_OF[topic])
+
+/** "Anyway ...", "ok back to the trade ...": the writing comes back from a stray. */
+const RETURN_CUE = /^(?:(?:ok(?:ay)?|so|but|and|well|yeah)[,]?\s+)*(?:any ?ways?\b|(?:getting |going |coming )?back to\b(?! back)|as i was saying\b|where was i\b)/i
+/**
+ * A sentence that starts like this continues the one before it ("After that I felt anxious",
+ * "Then it ran", "Second entry worked"), so it is never separated from it.
+ */
+const REFERENCE_OPENER =
+  /^(?:after|afterwards|then|still|so|but|and|or|plus|also|it|its|it's|that|that's|this|these|those|they|they're|he|she|there|again|which|because|bc|since|though|tho|yet|until|till|til|before|now|same|even|instead|otherwise|meanwhile|cause|cuz)\b/i
+const REFERENCE_SOON = /^(?:\S+\s+){0,2}(?:another|second|third|2nd|3rd|again|same|next (?:trade|entry|one|long|short|setup))\b/i
+/** A sentence that says what it follows from ("felt better after that"): it stays after it. */
+const REFERENCE_ANYWHERE = /\b(?:after (?:that|this|it|those|the (?:loss|losses|win|trade|stop|first|second|last))|because of (?:that|it|this)|since then|that's why|which is why|from that)\b/i
+
+/** Feelings about the trading itself (FOMO, impatient, angry): a reaction that belongs to the story, not a stray. */
+const NOT_REACTIONS = ['felt', 'feel', 'feeling', 'feelings', 'tired', 'sleep', 'energy', 'focus', 'focused', 'mood', 'happy', 'grateful', 'motivated', 'excited', 'bored', 'boredom', 'stress', 'stressed', 'mental', 'mentally']
+const REACTION_WORDS = new Set(Object.keys(KEYWORDS.mindset).filter((word) => !NOT_REACTIONS.includes(word)))
+
+interface SentenceInfo {
+  thread: Thread | null
+  words: number
+  keys: Set<string>
+  returns: boolean
+  opensWithReference: boolean
+  refersBack: boolean
+  /** Says nothing about the market or the trading at all ("my neighbor is drilling again"). */
+  offMarket: boolean
+}
+
+function describe(text: string): SentenceInfo {
+  const classified = classifyStatement(text)
+  const keys = sharedKeys(text)
+  const returns = RETURN_CUE.test(text)
+  let offMarket = classified.scores.setup === 0 && classified.scores.trades === 0 && keys.size === 0
+  for (const token of offMarket ? tokenize(text) : []) {
+    // A price, a time or an R multiple; a trading term; a feeling about the trading.
+    const lower = token.text.toLowerCase().replace(/’/g, "'")
+    const term = token.kind === 'word' ? lookupTerm(token.text) : null
+    if (token.kind !== 'word' || (term && (!term.ambiguous || isAllCaps(token.text))) || REACTION_WORDS.has(lower) || MARKET_WORDS_LOWER.has(lower)) {
+      offMarket = false
+      break
+    }
+  }
+  return {
+    thread: threadOf(classified.topic),
+    words: tokenize(text).filter((token) => token.kind === 'word').length,
+    keys,
+    returns,
+    opensWithReference: !returns && (REFERENCE_OPENER.test(text) || REFERENCE_SOON.test(text)),
+    refersBack: REFERENCE_ANYWHERE.test(text),
+    offMarket
+  }
+}
+
+/** Words that tie a sentence to the market even when no keyword scores it. */
+const MARKET_WORDS_LOWER = new Set(['price', 'market', 'chart', 'charts', 'trade', 'trades', 'trading', 'setup', 'setups', 'entry', 'level', 'levels', 'candle', 'candles', 'open', 'close', 'pdh', 'pdl'])
+
+export interface StrayMove {
+  /** The sentences that strayed (consecutive indexes). */
+  stray: number[]
+  /** The sentence the writing came back with. */
+  returnsAt: number
+  /** Came back with "anyway", "back to ..." rather than by naming the same level again. */
+  cued: boolean
+}
+
 export interface RegroupPlan {
-  /** Sentence indexes, one list per paragraph to write, in order. */
-  groups: number[][]
-  /** Runs of sentences moved back to an earlier run on the same topic. */
+  moves: StrayMove[]
+  /** Strays moved: each counts as one thought regrouped. */
   regrouped: number
 }
 
-/** How to regroup sentences by topic, or null when nothing strayed (the order stays). */
-export function regroupPlan(texts: readonly string[]): RegroupPlan | null {
-  const topics = topicsOf(texts)
-  if (topics.length < 3 || topics[0] === null) return null
-  const order: TopicKey[] = []
-  for (const topic of topics) if (!order.includes(topic!)) order.push(topic!)
-  let runs = 0
-  topics.forEach((topic, index) => {
-    if (index === 0 || topic !== topics[index - 1]) runs++
-  })
-  if (runs === order.length) return null
-  const groups = order.map((topic) => topics.flatMap((t, index) => (t === topic ? [index] : [])))
-  return { groups, regrouped: runs - order.length }
+/** The longest a stray may be, in sentences, and how many paragraphs back the thought it left may start. */
+const MAX_STRAY = 2
+const MAX_PARAGRAPH_SPAN = 2
+/** "Ok." or "lol." is an interjection, not a stray thought. */
+const MIN_STRAY_WORDS = 3
+
+/**
+ * Where the writing strayed and came back, or null when it did not. Deliberately narrow: one
+ * or two sentences (B) between two parts of the same thread (A ... A), close together, where
+ *
+ *  - the stray is an aside about something else altogether, in one paragraph: it says nothing
+ *    about the market and no feeling about the trading ("ugh my neighbor is drilling again");
+ *  - the return is explicit ("anyway", "ok back to the trade") or names the same ICT term or
+ *    price as the part it rejoins. With a cue, the stray may also lie a sentence or two
+ *    before the return;
+ *  - neither the stray nor the return starts by pointing back ("after that", "then", "it",
+ *    "second entry"), and the stray does not say what it follows from ("felt better after
+ *    that"): a story told in order (trade, reaction, trade, reaction) is not a stray.
+ *
+ * `paragraphs` gives each sentence's paragraph (by default all in one).
+ */
+export function regroupPlan(texts: readonly string[], paragraphs: readonly number[] = texts.map(() => 0)): RegroupPlan | null {
+  const info = texts.map(describe)
+  const smoothed = topicsOf(texts).map(threadOf)
+  const moves: StrayMove[] = []
+  let done = -1
+  /** Is sentences[first..last] a stray that the writing comes back from at `k`? */
+  const strayBefore = (k: number, first: number, last: number): boolean => {
+    const back = info[k]!
+    const anchor = first - 1
+    if (anchor < 0 || first <= done) return false
+    const thread = smoothed[anchor]
+    // The thought it left: a sentence about something (one with no clear topic only when it
+    // says something about the market, not a stray of its own).
+    if (thread === null || (info[anchor]!.thread === null && info[anchor]!.offMarket)) return false
+    if ((back.thread ?? (back.returns ? thread : null)) !== thread) return false
+    if (paragraphs[k]! - paragraphs[anchor]! > MAX_PARAGRAPH_SPAN) return false
+    // A stray is an aside about something else altogether, in one paragraph: a feeling about
+    // the trading ("felt FOMO") or anything about the market is part of the story.
+    const strays = info.slice(first, last + 1)
+    if (paragraphs[first] !== paragraphs[last] || !strays.every((sentence) => sentence.offMarket && sentence.words >= MIN_STRAY_WORDS)) return false
+    if (strays.some((sentence) => sentence.thread === thread || sentence.thread === 'lessons' || sentence.returns || sentence.refersBack) || strays[0]!.opensWithReference) return false
+    // Sentences between the stray and the return carry on the thought it left, in the same paragraph.
+    const between = info.slice(last + 1, k)
+    if (between.some((sentence) => sentence.thread !== thread || sentence.returns) || between[0]?.opensWithReference) return false
+    // ... and then the stray is clearly about something personal ("felt tired, didn't sleep").
+    if (between.length > 0 && (paragraphs[first] !== paragraphs[k] || strays.some((sentence) => sentence.thread === null))) return false
+    if (!back.returns) {
+      if (between.length > 0 || thread !== 'market') return false
+      // The stray is inside a paragraph of the thought it interrupts.
+      if (paragraphs[first] !== paragraphs[anchor] && paragraphs[last] !== paragraphs[k]) return false
+      const before = new Set<string>()
+      for (let j = anchor; j >= 0 && j >= anchor - 2 && smoothed[j] === thread; j--) for (const key of info[j]!.keys) before.add(key)
+      if (![...back.keys].some((key) => before.has(key))) return false
+    }
+    // The stray goes after the paragraph the return is in. The paragraph after that must not
+    // point back at what was there, nor start by coming back from a stray (the stray would sit
+    // right before a return again).
+    const next = texts.findIndex((_, index) => index > k && paragraphs[index] !== paragraphs[k])
+    return next === -1 || (!info[next]!.opensWithReference && !info[next]!.returns)
+  }
+  for (let k = 2; k < texts.length; k++) {
+    const back = info[k]!
+    if (!back.returns && back.opensWithReference) continue
+    // With "anyway" the stray may lie a sentence or two before the return; without, right before it.
+    const lastChoices = back.returns ? [k - 1, k - 2, k - 3] : [k - 1]
+    search: for (const last of lastChoices) {
+      for (let length = 1; length <= MAX_STRAY; length++) {
+        const first = last - length + 1
+        if (first < 1) break
+        if (strayBefore(k, first, last)) {
+          moves.push({ stray: Array.from({ length }, (_, i) => first + i), returnsAt: k, cued: back.returns })
+          done = k
+          break search
+        }
+      }
+    }
+  }
+  return moves.length > 0 ? { moves, regrouped: moves.length } : null
 }
 
 // ---------------------------------------------------------------- regrouping
@@ -582,30 +864,38 @@ function trimCells(cells: Cell[]): Cell[] {
   return cells.slice(start, end)
 }
 
-/** The sentences of some paragraphs, in order. Line breaks end a sentence too. */
-function sentencesOf(paragraphs: readonly RichNode[]): Cell[][] {
-  const out: Cell[][] = []
-  for (const paragraph of paragraphs) {
-    const lines: Cell[][] = [[]]
-    for (const cell of toCells(paragraph.content)) {
-      if (cell.atom) lines.push([])
-      else lines[lines.length - 1]!.push(cell)
+interface RunSentence {
+  cells: Cell[]
+  /** Index of its paragraph in the run. */
+  node: number
+  /** Which written paragraph it is in, blank lines not counted. */
+  paragraph: number
+}
+
+/** The sentences of some paragraphs (without line breaks), in order. */
+function sentencesOf(paragraphs: readonly RichNode[]): RunSentence[] {
+  const out: RunSentence[] = []
+  let written = -1
+  paragraphs.forEach((paragraph, node) => {
+    const line = toCells(paragraph.content)
+    const text = cellsText(line)
+    if (!text.trim()) return
+    written++
+    const tokens = tokenize(text)
+    let start = 0
+    const push = (cells: Cell[]): void => {
+      if (cells.length > 0) out.push({ cells, node, paragraph: written })
     }
-    for (const line of lines) {
-      const text = cellsText(line)
-      const tokens = tokenize(text)
-      let start = 0
-      for (const token of tokens) {
-        if (!token.sentenceStart || token === tokens[0]) continue
-        let cut = token.from
-        while (cut > start && !/\s/.test(text[cut - 1]!)) cut--
-        out.push(trimCells(line.slice(start, cut)))
-        start = cut
-      }
-      out.push(trimCells(line.slice(start)))
+    for (const token of tokens) {
+      if (!token.sentenceStart || token === tokens[0]) continue
+      let cut = token.from
+      while (cut > start && !/\s/.test(text[cut - 1]!)) cut--
+      push(trimCells(line.slice(start, cut)))
+      start = cut
     }
-  }
-  return out.filter((sentence) => sentence.length > 0)
+    push(trimCells(line.slice(start)))
+  })
+  return out
 }
 
 /** A sentence that will be followed by another in its paragraph ends with a full stop. */
@@ -618,38 +908,78 @@ function endSentence(cells: Cell[], counter: Counter): Cell[] {
   return [...cells, { ch: '.', marks: marks && marks.length > 0 ? marks : undefined }]
 }
 
-const paragraph = (content: RichNode[]): RichNode => (content.length > 0 ? { type: 'paragraph', content } : { type: 'paragraph' })
-
-/** Regroup one run of plain paragraphs: one paragraph per topic, or the run as it was. */
-function regroupRun(paragraphs: RichNode[], speller: Speller, counter: Counter): { nodes: RichNode[]; regrouped: number } {
-  const unchanged = { nodes: paragraphs, regrouped: 0 }
-  const sentences = sentencesOf(paragraphs)
-  const plan = regroupPlan(sentences.map(cellsText))
-  if (!plan) return unchanged
-  const local: Counter = { words: 0, tidy: 0 }
-  const nodes = plan.groups.map((group) => {
-    const cells: Cell[] = []
-    group.forEach((index, n) => {
-      if (n > 0) cells.push({ ch: ' ', marks: undefined })
-      cells.push(...endSentence(sentences[index]!, local))
-    })
-    return paragraph(fromCells(pass(cells, (text, locked) => capitalEdits(tokenize(text), speller, locked), local)))
+/** A paragraph like `like` (its attributes) holding these sentences. */
+function paragraphOf(like: RichNode, sentences: RunSentence[], speller: Speller, counter: Counter): RichNode {
+  const cells: Cell[] = []
+  sentences.forEach((sentence, n) => {
+    if (n > 0) cells.push({ ch: ' ', marks: undefined })
+    cells.push(...endSentence(sentence.cells, counter))
   })
-  // Only a regrouping that a second look would leave as it is: Organize twice is Organize once.
-  const again = sentencesOf(nodes)
-  if (again.length !== sentences.length || regroupPlan(again.map(cellsText)) !== null) return unchanged
-  counter.tidy += local.tidy
-  return { nodes, regrouped: plan.regrouped }
+  const content = fromCells(pass(cells, (text, locked) => capitalEdits(tokenize(text), speller, locked), counter))
+  const node: RichNode = { type: 'paragraph' }
+  if (like.attrs) node.attrs = like.attrs
+  if (content.length > 0) node.content = content
+  return node
+}
+
+/**
+ * Regroup one run of plain paragraphs: each stray goes, as a paragraph of its own, after the
+ * paragraph the writing came back in; every other paragraph stays exactly as it was.
+ */
+function regroupRun(paragraphs: RichNode[], speller: Speller, counter: Counter): { nodes: RichNode[]; regrouped: number } {
+  const local: Counter = { words: 0, tidy: 0 }
+  let nodes = paragraphs
+  let regrouped = 0
+  // Moving a stray can leave another one plain to see (a sentence further back from the same
+  // "anyway"): look again until nothing more moves, so Organize twice is Organize once.
+  for (let pass = 0; pass < MAX_REGROUP_PASSES; pass++) {
+    const sentences = sentencesOf(nodes)
+    const plan = regroupPlan(
+      sentences.map((sentence) => cellsText(sentence.cells)),
+      sentences.map((sentence) => sentence.paragraph)
+    )
+    if (!plan) {
+      counter.tidy += local.tidy
+      return { nodes, regrouped }
+    }
+    nodes = moveStrays(nodes, sentences, plan.moves, speller, local)
+    regrouped += plan.regrouped
+  }
+  return { nodes: paragraphs, regrouped: 0 }
+}
+
+const MAX_REGROUP_PASSES = 4
+
+/** The paragraphs with these strays moved, each after the paragraph its thought came back in. */
+function moveStrays(paragraphs: RichNode[], sentences: RunSentence[], moves: StrayMove[], speller: Speller, counter: Counter): RichNode[] {
+  const moved = new Set(moves.flatMap((move) => move.stray))
+  const after = new Map<number, number[][]>()
+  for (const move of moves) {
+    const node = sentences[move.returnsAt]!.node
+    after.set(node, [...(after.get(node) ?? []), move.stray])
+  }
+  const nodes: RichNode[] = []
+  paragraphs.forEach((paragraph, index) => {
+    const own = sentences.filter((sentence) => sentence.node === index)
+    const kept = own.filter((sentence) => !moved.has(sentences.indexOf(sentence)))
+    if (kept.length === own.length) nodes.push(paragraph)
+    else if (kept.length > 0) nodes.push(paragraphOf(paragraph, kept, speller, counter))
+    for (const stray of after.get(index) ?? []) nodes.push(paragraphOf(paragraphs[sentences[stray[0]!]!.node]!, stray.map((i) => sentences[i]!), speller, counter))
+  })
+  return nodes
 }
 
 const isBlankParagraph = (node: RichNode): boolean => node.type === 'paragraph' && (node.content ?? []).every((child) => child.type === 'text' && !(child.text ?? '').trim())
 /** A line that is only a label ("Lessons:"): it and the lines under it, up to a blank line, stay as they are. */
 const LABEL_LINE = /^\s*(?:lessons?|rules?|reminders?|takeaways?|plan|bias|setups?|mindset|psychology|trades?|notes?)\s*[:—–-]?\s*$/i
+/** A paragraph that starts a new day or session: "Monday ...", "Nov 24 ...", "11/24", "today ...". */
+const DAY_START =
+  /^(?:(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b|\d{1,2}[/.]\d{1,2}(?:[/.]\d{2,4})?\b|\d{4}-\d{2}-\d{2}\b|(?:today|yesterday|tonight|this morning|this week|last week|week \d+|day \d+)\b)/i
 
 /**
  * Regroup each run of plain paragraphs on its own. Anything else ends a run and stays where it
- * is: headings, lists, quotes, code, pictures, session log lines, label lines and their lines.
- * Blank lines inside a run that is regrouped go; blank lines around it stay.
+ * is: headings, lists, quotes, code, pictures, session log lines, label lines and their lines,
+ * and lines broken with Shift+Enter. A paragraph that starts a new day starts a new run.
  */
 function regroupDocument(nodes: RichNode[], speller: Speller, counter: Counter): { content: RichNode[]; regrouped: number } {
   const content: RichNode[] = []
@@ -682,11 +1012,12 @@ function regroupDocument(nodes: RichNode[], speller: Speller, counter: Counter):
     }
     const lines = cellsText(toCells(node.content)).split('\n')
     if (LABEL_LINE.test(lines[0]!)) underLabel = true
-    if (underLabel || lines.some((line) => LOG_LINE.test(line))) {
+    if (underLabel || lines.length > 1 || lines.some((line) => LOG_LINE.test(line))) {
       flush()
       content.push(node)
       continue
     }
+    if (DAY_START.test(lines[0]!.trim())) flush()
     run.push(node)
   }
   flush()

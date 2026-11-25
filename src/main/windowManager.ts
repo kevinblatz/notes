@@ -189,8 +189,8 @@ export class WindowManager {
         sandbox: true,
         webSecurity: true,
         // The app has its own spelling checker (src/shared/spelling.ts), which knows trading
-        // terms. Chromium's is off everywhere, so it never underlines FVG or NWOG and never
-        // downloads dictionaries: the app makes no network requests.
+        // terms. Chromium's is off everywhere, so it never underlines FVG or NWOG (and the
+        // session's own checker is off too, so no dictionary is downloaded: see index.ts).
         spellcheck: false,
         devTools: this.options.allowDevTools
       }

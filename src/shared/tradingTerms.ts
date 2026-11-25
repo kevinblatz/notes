@@ -19,12 +19,16 @@ export const CANONICAL_TERMS: readonly string[] = [
   'NWOG', 'NDOG', 'FVG', 'IFVG', 'BISI', 'SIBI', 'BPR', 'OTE', 'SMT', 'MSS', 'BOS', 'CHoCH', 'CISD',
   'PDH', 'PDL', 'PWH', 'PWL', 'PMH', 'PML', 'PDA', 'EQH', 'EQL', 'ERL', 'IRL', 'DOL', 'HTF', 'LTF', 'SSL', 'BSL',
   'ADR', 'AMD', 'PO3', 'CBDR', 'IPDA', 'MMXM', 'MMBM', 'MMSM', 'SMC', 'ICT', 'LRLR', 'HRLR', 'NYOS',
-  'ONH', 'ONL', 'IBH', 'IBL', 'HOD', 'LOD', 'ATH', 'POC', 'VAH', 'LVN', 'HVN',
+  'ONH', 'ONL', 'IBH', 'IBL', 'HOD', 'LOD', 'ATH', 'ATL', 'POC', 'VAH', 'LVN', 'HVN',
+  'CE', 'IDM', 'ITH', 'ITL', 'STH', 'STL', 'LTH', 'LTL', 'SFP', 'LV', 'RDRB', 'IDR', 'RTO', 'MSB', 'IOFED', 'LOKZ', 'NYKZ',
+  'ORH', 'ORL', 'MTF',
   // news, indicators, sessions, exchanges
   'FOMC', 'CPI', 'NFP', 'PPI', 'GDP', 'PCE', 'VWAP', 'RTH', 'DXY', 'SPX', 'VIX', 'ATR', 'EMA', 'SMA', 'RSI', 'MACD',
   'NY', 'NYC', 'NYSE', 'CME', 'Globex', 'Nasdaq', 'Asia', 'Asian', 'London', 'Frankfurt', 'Judas',
   // instruments
-  'NQ', 'MNQ', 'YM', 'MYM', 'RTY', 'M2K', 'MES', 'QQQ',
+  'NQ', 'MNQ', 'YM', 'MYM', 'RTY', 'M2K', 'MES', 'QQQ', 'IWM', 'MGC', 'MCL',
+  // platforms and prop firms
+  'TradingView', 'Tradovate', 'NinjaTrader', 'Topstep', 'Rithmic', 'Bookmap', 'Tradezella', 'Tradervue',
   // trade management
   'TP', 'TP1', 'TP2', 'TP3', 'SL', 'PnL', 'RR', 'FOMO'
 ]
@@ -35,7 +39,7 @@ export const CANONICAL_TERMS: readonly string[] = [
  * time or a timeframe in it. AM and PM go further and need "NY", a session or a killzone
  * right next to them ("ny am killzone" -> "NY AM killzone").
  */
-export const AMBIGUOUS_TERMS: readonly string[] = ['ES', 'ETH', 'OB', 'BB', 'MB', 'RB', 'SB', 'VI', 'KZ', 'SPY', 'AM', 'PM']
+export const AMBIGUOUS_TERMS: readonly string[] = ['ES', 'ETH', 'OB', 'BB', 'MB', 'RB', 'SB', 'VI', 'KZ', 'SPY', 'AM', 'PM', 'ORG', 'MT', 'DR', 'PD', 'PB', 'IB', 'POI', 'CL', 'GC']
 
 /** Words next to which "am" / "pm" are the New York sessions rather than the verb or a clock. */
 export const SESSION_NEIGHBOURS: ReadonlySet<string> = new Set(['ny', 'london', 'asia', 'session', 'sessions', 'killzone', 'killzones', 'kz', 'macro', 'macros', 'open', 'opening', 'range', 'high', 'low', 'trend', 'reversal', 'silver', 'bullet'])
@@ -60,7 +64,9 @@ export const TRADING_WORDS: readonly string[] = [
   'confluence', 'confirmation', 'momentum', 'volatility', 'volume', 'overnight', 'orderflow', 'untapped', 'unfilled',
   'filled', 'fill', 'macro', 'macros', 'unicorn', 'turtle', 'soup', 'silver', 'bullet', 'swing', 'rejection', 'respected',
   'journal', 'patience', 'discipline', 'overtrade', 'overtrades', 'overtrading', 'overtraded', 'revenge', 'tilt', 'tilted', 'impatient', 'reentry',
-  'reentered', 'futures', 'narrative', 'algo', 'algos'
+  'reentered', 'futures', 'narrative', 'algo', 'algos', 'backtest', 'backtests', 'backtested', 'backtesting', 'journaling', 'journaled',
+  'fakeout', 'fakeouts', 'stopout', 'stopouts', 'rewatch', 'rewatched', 'rewatching', 'intraday', 'prop', 'rangebound', 'nonfarm',
+  'payout', 'payouts', 'gappy', 'uptrend', 'downtrend', 'whipsaw', 'whipsawed', 'daytrade', 'daytrading', 'daytrader'
 ]
 
 /**
@@ -71,6 +77,18 @@ export const CASUAL_WORDS: readonly string[] = [
   'lol', 'lmao', 'haha', 'hahaha', 'tho', 'thru', 'gonna', 'wanna', 'gotta', 'kinda', 'sorta', 'btw', 'imo', 'imho', 'tbh',
   'ngl', 'idk', 'ok', 'okay', 'yeah', 'yep', 'yup', 'nope', 'nah', 'omg', 'smh', 'rn', 'fr', 'af', 'pls', 'plz', 'ppl',
   'mins', 'min', 'hrs', 'hr', 'secs', 'pts', 'pt', 'yday', 'vs', 'etc', 'eg', 'ie', 'aka', 'ish'
+]
+
+/**
+ * Trader's and texting shorthand, kept exactly as typed and never underlined like the casual
+ * words, but never offered as a correction either (so a typo is never "fixed" into "mkt").
+ */
+export const SHORTHAND_WORDS: readonly string[] = [
+  'acct', 'accts', 'acc', 'avg', 'max', 'vol', 'vols', 'prev', 'liq', 'cont', 'mkt', 'mkts', 'pos', 'qty', 'approx', 'sec', 'vid', 'vids',
+  'lon', 'ldn', 'eod', 'eow', 'eom', 'wk', 'wks', 'yr', 'yrs', 'esp', 'bal', 'tf', 'tfs', 'eval', 'evals', 'fxreplay', 'bto', 'stc', 'wknd',
+  'r:r', 'premkt', 'nite', 'overnite', 'fomoed', "fomo'd", 'bro', 'bruh', 'fam', 'rekt', 'sus', 'prolly', 'tryna', 'finna', 'lowkey',
+  'cuz', 'coz', 'tbf', 'iirc', 'afaik', 'wtf', 'ffs', 'oof', 'welp', 'yolo', 'thx', 'ty', 'np', 'def', 'prob', 'probs', 'rly', 'pic',
+  'pics', 'convo', 'u', 'ur'
 ]
 
 export interface TermEntry {
@@ -102,7 +120,7 @@ export const TERMS: ReadonlyMap<string, TermEntry> = buildTerms()
 
 /** Trading words and casual shorthand, lower case. */
 export const TRADING_WORD_SET: ReadonlySet<string> = new Set(TRADING_WORDS)
-export const CASUAL_WORD_SET: ReadonlySet<string> = new Set(CASUAL_WORDS)
+export const CASUAL_WORD_SET: ReadonlySet<string> = new Set([...CASUAL_WORDS, ...SHORTHAND_WORDS])
 
 /** The term a word (any case, with or without 's) stands for, or null. */
 export function lookupTerm(word: string): TermEntry | null {

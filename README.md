@@ -119,10 +119,16 @@ write. A misspelled word gets a soft wavy underline once you have finished typin
 note, its title, image captions, tags and the quick note strip). Never underlined:
 
 - ICT and trading terms: NWOG, NDOG, FVG, IFVG, BISI, SIBI, BPR, OB, BB, MB, RB, VI, OTE, SMT, MSS,
-  BOS, CHoCH, CISD, PDH, PDL, PWH, PWL, PDA, EQH, EQL, ERL, IRL, DOL, HTF, LTF, SSL, BSL, ADR, AMD,
-  PO3, CBDR, IPDA, MMXM, MMBM, MMSM, SB, KZ, FOMC, CPI, NFP, PPI, VWAP, RTH, ETH, DXY, SPX, ES, NQ,
-  MES, MNQ, YM, RTY and more, with their plurals and possessives (FVGs, IFVG's), and words like
-  killzone, Judas swing, turtle soup, unicorn, silver bullet, displacement, rebalance, premarket.
+  BOS, CHoCH, CISD, CE, MT, POI, PD array, IDM, ITH/ITL, STH/STL, LTH/LTL, SFP, LV, RDRB, IB, DR/IDR,
+  RTO, MSB, IOFED, LOKZ/NYKZ, ORG, PDH, PDL, PWH, PWL, PDA, EQH, EQL, ERL, IRL, DOL, HTF, LTF, SSL,
+  BSL, ADR, AMD, PO3, CBDR, IPDA, MMXM, MMBM, MMSM, SB, KZ, FOMC, CPI, NFP, PPI, VWAP, RTH, ETH, DXY,
+  SPX, ES, NQ, MES, MNQ, YM, RTY and more, with their plurals and possessives (FVGs, IFVG's), and
+  words like killzone, Judas swing, turtle soup, unicorn, silver bullet, displacement, rebalance,
+  premarket, backtest, journaling, fakeout, rangebound; platforms and prop firms (TradingView,
+  Tradovate, NinjaTrader, Topstep, Rithmic, Bookmap).
+- Trader's and texting shorthand, left exactly as typed: acct, avg, max, vol, prev, liq, cont, mkt,
+  pos, qty, approx, sec, vid, lon, ldn, eod, eval, r:r, lol, tho, tbh, ngl, rn, bro, rekt and more.
+- Correct British spellings (colour, behaviour, realised, analysed, centre, travelled, grey).
 - Numbers, prices ($500, -$120, 6,123.25), times (9:30, 09:31:05, 10am), percentages,
   timeframes and R multiples (5m, 4H, M15, +2R), tickers (ES1!), web addresses and emails, text
   in a link or in code.
@@ -140,41 +146,53 @@ What Organize does, all on your computer (it is a set of fixed rules, not an AI 
 deliberately light: your note keeps its wording and its shape, it is only fixed and, where a
 thought wandered off and came back, put back together.
 
-1. **Fixes words** it is sure about: displacment → displacement, imapatient → impatient,
-   tommorow → tomorrow; dont → don't, im → I'm, thats → that's, a lone i → I; trading terms in
-   their usual form (fvg → FVG, ifvgs → IFVGs, nwog → NWOG, choch → CHoCH, asia → Asia, +2r → +2R);
-   a few shorthands (bc and b/c → because, w/ → with, w/o → without, tmrw → tomorrow, b4 → before);
-   "re entered" → "re-entered", "to early" → "too early", "the the" → "the". A short code that is
-   also a word (am, es, ob, eth ...) is only written as a term in a sentence about the market:
-   "ny am killzone" becomes "NY AM killzone", "I am late" stays. A word it is not sure about stays
-   as you typed it, still underlined. Bold, links, highlights and colours are kept.
-2. **Fixes punctuation**: a capital at the start of each sentence, single spaces, no space before
-   a comma or full stop, a full stop at the end of a sentence that has none, and a colon after a
-   label ("lesson dont chase" → "Lesson: don't chase"). A long line typed without any punctuation
-   is split into sentences, carefully: only before words like *then*, *but* or *so*, or after
-   *lol*, and only where both parts are at least five words long. Headings, list items, short
-   labels and session log lines get no full stop.
-3. **Puts strayed thoughts back together.** Each sentence is read for what it is about: the setup
-   (your plan and bias, and what the market did), your trades, your mindset, or a lesson or
-   rule. When your writing wanders to another topic and later comes back to the first one, the
-   sentences about the same topic are brought together: one plain paragraph per topic, the topics
-   in the order you first wrote about them, the sentences in your order within each. A sentence
-   that is not clearly about anything, or that names the same ICT term or price as the one
-   before it, stays with the sentence before it. No headings or bullets are added. When nothing
-   strayed, your paragraphs stay exactly as they were, so a paragraph about one thing (a mindset
-   reflection) is only fixed.
+1. **Fixes words** it is sure about, in the text and in picture captions: displacment →
+   displacement, imapatient → impatient, tommorow → tomorrow; dont → don't, im → I'm, thats →
+   that's, a lone i → I; trading terms in their usual form (fvg → FVG, ifvgs → IFVGs, nwog → NWOG,
+   choch → CHoCH, ce → CE, asia → Asia, +2r → +2R); a few shorthands (bc and b/c → because, w/ →
+   with, w/o → without, tmrw → tomorrow, b4 → before). A short code that is also a word (am, es,
+   ob, org, mt ...) is only written as a term in a sentence about the market: "ny am killzone"
+   becomes "NY AM killzone", "I am late" stays. A word of four letters or fewer is only changed
+   when two letters were swapped (lnog → long), and a word made of known parts (backtest,
+   rewatched, journaling) is kept, so shorthand like avg, vol or eval is never turned into
+   another word. A word it is not sure about stays as you typed it, still underlined. Bold,
+   links, highlights and colours are kept.
+2. **Fixes grammar slips** where there is no doubt: "re entered" → "re-entered", "to early" →
+   "too early" (also too nervous, too tired, too scared ...), "should of waited" → "should have
+   waited", "its not" → "it's not", "don't want to loose" → "lose", "a IFVG" → "an IFVG" (before
+   a code that starts with A, E, I or O), "new york" → "New York", "the the" → "the".
+3. **Fixes punctuation**: a capital at the start of each sentence (a code there in its own
+   capitals: "es was slow" → "ES was slow"), single spaces, no doubled commas, no space before a
+   comma or full stop, a full stop at the end of a sentence that has none, and a colon after a
+   label ("lesson dont chase the first push wait for mss" → "Lesson: don't chase the first push,
+   wait for MSS"). A long sentence typed without any punctuation (20 words or more) is split,
+   carefully: only before words like *then*, *but* or *so*, or after *lol*, where both parts are
+   at least five words long, never after a word like *at* or *and* and never inside an *if ...
+   then*; a trade's levels in it get commas ("in the IFVG, stop 6096, TP 6130, got stopped out").
+   Headings, list items, short labels and session log lines get no full stop.
+4. **Puts a stray thought back.** When your writing leaves a thought for a sentence or two and
+   comes back to it, the stray moves out of the way, as a paragraph of its own after the one you
+   came back in. This only happens close by, and only when you clearly came back: with *anyway*,
+   *back to ...*, or by naming the same level again (and then only when the stray has nothing to
+   do with the market, like "ugh my neighbor is drilling again"). A story told in order (trade,
+   how you felt, the next trade) is never taken apart, and your paragraphs stay as they are. No
+   headings or bullets are added.
 
-For example, *"nwog at 6120 was the draw ... took long at 6104 in the ifvg ... second entry worked
-+2r. lesson dont chase the first push wait for mss. felt calm after tho. ny am killzone was clean,
-silver bullet 10-11 gave the move"* becomes four paragraphs: the setup and the plan (with the
-killzone sentence from the end back beside them), the trades, the lesson, and the mindset.
+For example, *"nwog at 6120 was the draw ... ugh my neighbor is drilling again cant focus. anyway i
+was bullish bias from premarket bc pdh 6135 unswept. took long at 6104 in the ifvg stop 6096 tp
+6130 got stopped out first time lol felt fomo and re entered to early. second entry worked +2r.
+lesson dont chase the first push wait for mss ..."* becomes *"NWOG at 6120 was the draw ... Anyway
+I was bullish bias from premarket because PDH 6135 unswept. Took long at 6104 in the IFVG, stop
+6096, TP 6130, got stopped out first time lol. Felt FOMO and re-entered too early. Second entry
+worked +2R. Lesson: don't chase the first push, wait for MSS ..."*, with *"Ugh my neighbor is
+drilling again can't focus."* as a paragraph of its own under it.
 
 Never moved and never merged: your own headings, lists, checklists, quotes and code (their text
 is fixed, nothing else), pictures and drawings, session log lines (`09:31:05 — London high
-taken` stays one line per entry, in time order), and a line that is only a label (*Lessons:*)
-together with the lines under it, up to the next blank line. Thoughts are only regrouped between
-these, so everything keeps its place around them. Organizing an organized note changes nothing,
-and a line you add at the end later joins its topic the next time.
+taken` stays one line per entry, in time order), lines you broke with Shift + Enter, and a line
+that is only a label (*Lessons:*) together with the lines under it, up to the next blank line.
+A stray is only moved between these, and never past a paragraph that starts a new day
+(*Tuesday ...*, *Nov 25 ...*). Organizing an organized note changes nothing.
 
 The word list (about 77,000 English words) loads in the background the first time a note opens;
 until it is in, nothing is underlined. Chromium's own spelling checker is switched off, so it
@@ -350,9 +368,9 @@ Not verified by automation, so worth a look on your own machine:
 
 Known limitations: the app is not code-signed (SmartScreen asks once); search does not read
 text inside screenshots; there is no sync between computers (use Backup and import). The
-spelling checker knows US English only, and Organize tells what a sentence is about from the
-words in it, so now and then a sentence moves where you would not have put it (one Ctrl + Z
-undoes it all).
+spelling checker knows US English (and accepts the common British spellings), and Organize tells
+what a sentence is about from the words in it, so now and then it may leave a stray where it was
+or move one you would have kept (one Ctrl + Z undoes it all).
 
 ## Development
 

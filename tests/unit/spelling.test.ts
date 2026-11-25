@@ -136,8 +136,9 @@ describe('autocorrect', () => {
   it('puts back the apostrophes of contractions', () => {
     expect(corrected('dont didnt doesnt cant wont isnt wasnt werent arent couldnt shouldnt wouldnt havent hasnt')).toBe("don't didn't doesn't can't won't isn't wasn't weren't aren't couldn't shouldn't wouldn't haven't hasn't")
     expect(corrected('im ive youre theyre thats whats theres')).toBe("I'm I've you're they're that's what's there's")
-    // "lets" and "its" are words of their own and stay.
-    expect(corrected('it lets me and its fine')).toBe('it lets me and its fine')
+    // "lets" and "its" are words of their own and stay ("its" only becomes "it's" where it
+    // cannot be the possessive: see the grammar slips below).
+    expect(corrected('it lets me and its range held')).toBe('it lets me and its range held')
   })
 
   it('makes a standalone i a capital I', () => {
@@ -225,6 +226,83 @@ describe('autocorrect', () => {
   })
 })
 
+describe('trader words', () => {
+  it('leaves shorthand and trading words as typed: never underlined, never "corrected" into another word', () => {
+    const words =
+      'journaling backtest backtesting fakeout stopout rewatched intraday prop rangebound nonfarm eval evals topstep acct acc avg max vol prev liq cont mkt pos qty approx sec vid lon ldn eod wk yr esp bal fxreplay wifi intro admin config tech breathwork bro rekt prolly r:r'
+    expect(misses(words)).toEqual([])
+    expect(corrected(words)).toBe(words.replace('topstep', 'Topstep'))
+    const sentences: Record<string, string> = {
+      'need to keep journaling every day and backtest more on fxreplay': 'need to keep journaling every day and backtest more on fxreplay',
+      'Topstep eval failed': 'Topstep eval failed',
+      'waited 30 sec after the candle closed then entered, max 2 contracts': 'waited 30 sec after the candle closed then entered, max 2 contracts',
+      'avg entry 6104, acct up 3% this week': 'avg entry 6104, acct up 3% this week',
+      'lon high at 6131 got taken, then ny reversed': 'lon high at 6131 got taken, then NY reversed',
+      'that was a fakeout, classic stopout then it ran': 'that was a fakeout, classic stopout then it ran',
+      'watched a vid on the silver bullet, intro was long': 'watched a vid on the silver bullet, intro was long',
+      'my wifi dropped at the open': 'my wifi dropped at the open',
+      'did some breathwork before the open': 'did some breathwork before the open',
+      'prev day high at 6140, vol was low': 'prev day high at 6140, vol was low',
+      'liq above the highs, cont higher expected': 'liq above the highs, cont higher expected',
+      'bro this market is rekt lol': 'bro this market is rekt lol',
+      'took it on my topstep eval through tradovate and charted on tradingview': 'took it on my Topstep eval through Tradovate and charted on TradingView',
+      'the new york session was rangebound and r:r was 1:3': 'the New York session was rangebound and r:r was 1:3'
+    }
+    for (const [typed, expected] of Object.entries(sentences)) expect(corrected(typed), typed).toBe(expected)
+  })
+
+  it('changes a word of four letters or fewer only when two neighbouring letters were swapped', () => {
+    expect(speller.fix('lnog')).toBe('long')
+    expect(speller.fix('liek')).toBe('like')
+    // Anything else is underlined and suggested, never changed.
+    expect(speller.fix('thw')).toBeNull()
+    expect(misses('thw open')).toEqual(['thw'])
+    expect(speller.suggest('thw')).toContain('the')
+    for (const word of ['iwm', 'pos', 'qty', 'bal', 'yrs', 'wks', 'esp', 'tech', 'atl']) expect(speller.fix(word) ?? word, word).not.toMatch(/^(?:I'm|post|RTY|ball|yes|was|Sep|teach|at)$/)
+  })
+
+  it('keeps a word made of known parts as typed, unless only its ending is wrong', () => {
+    for (const word of ['retraded', 'flatlined', 'mispriced', 'recentered', 'chartbook', 'forwardtest', 'macbooks']) expect(speller.fix(word), word).toBeNull()
+    const slips: Record<string, string> = { enterring: 'entering', stoped: 'stopped', transfering: 'transferring', opend: 'opened', tradeing: 'trading', begining: 'beginning', runing: 'running' }
+    for (const [typo, word] of Object.entries(slips)) expect(speller.fix(typo), typo).toBe(word)
+  })
+
+  it('accepts British spellings as they are', () => {
+    const british = 'realised behaviour analysed colour organised favourite centre travelled grey practise defence catalogue'
+    expect(misses(british)).toEqual([])
+    expect(corrected(british)).toBe(british)
+    expect(misses('I realised my behaviour after a loss is the problem. I analysed the colour of the candles')).toEqual([])
+    // Not a misspelling that only looks British.
+    expect(speller.fix('fourty')).toBe('forty')
+    expect(misses('the sise of it')).toEqual(['sise'])
+  })
+
+  it('know the ICT codes in lower case: never underlined, written in capitals', () => {
+    const codes = 'ce poi idm ith itl sth stl lth ltl sfp lv rdrb idr rto msb iofed lokz nykz orh orl org mt dr pd pb ib cl gc atl mtf'
+    expect(misses(codes)).toEqual([])
+    expect(misses('two fvgs and three ifvgs, the fvg’s ce held')).toEqual([])
+    expect(corrected('ce of the fvg held, idm got swept at 9:35 and the sfp at the ith was the poi')).toBe('CE of the FVG held, IDM got swept at 9:35 and the SFP at the ITH was the POI')
+    expect(corrected('the org filled at 9:35, mt of the ob held at 6100, the stl and lokz high')).toBe('the ORG filled at 9:35, MT of the OB held at 6100, the STL and LOKZ high')
+    expect(corrected('the pd array was clean')).toBe('the PD array was clean')
+    // Codes that are also words or abbreviations change only in a market sentence.
+    expect(corrected('the org meeting at work and mt everest, dr said rest')).toBe('the org meeting at work and mt everest, dr said rest')
+  })
+
+  it('fixes the grammar slips a hurried journal makes, only where there is no doubt', () => {
+    expect(corrected('should of waited, could of been +3r, i shouldnt of took it, would of just waited')).toBe("should have waited, could have been +3R, I shouldn't have took it, would have just waited")
+    expect(corrected('i was to nervous to take it and to tired to care, to scared to enter')).toBe('I was too nervous to take it and too tired to care, too scared to enter')
+    expect(corrected('my stop was to high. i was to slow')).toBe('my stop was too high. I was too slow')
+    expect(corrected('its not the setup, its been a week, its a good day, its fine')).toBe("it's not the setup, it's been a week, it's a good day, it's fine")
+    expect(corrected('i dont want to loose more than 1r. if i loose 2 trades i stop. stop loosing')).toBe("I don't want to lose more than 1R. if I lose 2 trades I stop. stop losing")
+    expect(corrected('a ifvg, a ob, a ote and a ny open. A IFVG. TOOK A IFVG')).toBe('an IFVG, an OB, an OTE and a NY open. An IFVG. TOOK AN IFVG')
+    // English that must stay as it is.
+    expect(corrected('could of course, the market and its range, cut loose, price went to high of day, need to slow down')).toBe(
+      'could of course, the market and its range, cut loose, price went to high of day, need to slow down'
+    )
+    expect(corrected('a fvg and a mss')).toBe('a FVG and a MSS')
+  })
+})
+
 describe('reading text', () => {
   it('splits words from punctuation and knows where sentences start', () => {
     const tokens = tokenize('ok. then "this" — 09:31:05 — fvg, re-entered')
@@ -261,5 +339,9 @@ describe('the user’s words', () => {
     expect(sanitizeUserWords(['  Kenzie ', 'kenzie', 'two words', '', 42, 'x'.repeat(60), '123', 'Smoove'])).toEqual(['Kenzie', 'Smoove'])
     expect(sanitizeUserWords('nope')).toEqual([])
     expect(sanitizeUserWords(Array.from({ length: MAX_USER_WORDS + 50 }, (_, i) => `word${i}`))).toHaveLength(MAX_USER_WORDS)
+  })
+
+  it('never hold control or invisible characters', () => {
+    expect(sanitizeUserWords(['bad\u0000word', 'zero\u200bwidth', 'join\u200dme', 'bom\ufeffword', 'word\u2060joiner', 'tab\tword', 'Kenzie'])).toEqual(['Kenzie'])
   })
 })

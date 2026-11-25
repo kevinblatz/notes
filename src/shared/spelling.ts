@@ -201,6 +201,38 @@ const TIMEFRAME_RE = /^\d{1,3}(?:s|m|min|h|hr|d|w|mo)$|^[mhdw]\d{1,3}$/i
 
 const POSSESSIVE_RE = /^(.+?)(['’]s)$/
 
+/**
+ * The American spelling of a British one ("colour" -> "color", "realised" -> "realized",
+ * "analysed" -> "analyzed", "centre" -> "center", "travelled" -> "traveled", "grey" -> "gray"),
+ * when `isWord` knows it; otherwise null. The word list is American, and a correct
+ * British spelling is neither underlined nor changed.
+ */
+export function americanSpelling(lower: string, isWord: (word: string) => boolean): string | null {
+  const special = BRITISH_WORDS.get(lower)
+  if (special) return isWord(special) ? special : null
+  const tries = [
+    lower.replace(/(?<=^[a-z]{2,})our(?=$|s$|ed$|ing$|ite$|ites$|ful$|fully$|able$|ably$|er$|ers$|less$|hood$|hoods$|ism$)/, 'or'),
+    lower.replace(/(?<=^[a-z]{3,})is(?=e$|es$|ed$|ing$|ation$|ations$|er$|ers$|able$)/, 'iz'),
+    lower.replace(/(?<=^[a-z]{3,})ys(?=e$|es$|ed$|ing$|er$|ers$)/, 'yz'),
+    lower.replace(/(?<=^[a-z]{2,}[tb])re(?=$|s$)/, 'er'),
+    lower.replace(/(?<=^[a-z]{3,}[aeiou])ll(?=ed$|ing$|er$|ers$)/, 'l'),
+    lower.replace(/(?<=^[a-z]{3,})ogue(?=$|s$)/, 'og')
+  ]
+  for (const american of tries) if (american !== lower && isWord(american)) return american
+  return null
+}
+
+/** British spellings that no rule covers. */
+const BRITISH_WORDS: ReadonlyMap<string, string> = new Map(
+  Object.entries({
+    grey: 'gray', greys: 'grays', mum: 'mom', mums: 'moms', practise: 'practice', practised: 'practiced', practising: 'practicing',
+    programme: 'program', programmes: 'programs', tyre: 'tire', tyres: 'tires', cheque: 'check', cheques: 'checks', maths: 'math',
+    whilst: 'while', learnt: 'learned', spelt: 'spelled', dreamt: 'dreamed', burnt: 'burned', aeroplane: 'airplane',
+    judgement: 'judgment', ageing: 'aging', fulfil: 'fulfill', skilful: 'skillful', jewellery: 'jewelry', storey: 'story',
+    defence: 'defense', offence: 'offense', licence: 'license', pretence: 'pretense'
+  })
+)
+
 /** QWERTY key positions, for "a neighbouring key was hit". */
 const KEY_POSITIONS: ReadonlyMap<string, [number, number]> = (() => {
   const rows = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm']
@@ -243,6 +275,14 @@ export function slipCost(typed: string, word: string): number {
   // The typed word is the shorter one: a letter was left out.
   if (doubled || a.length < b.length) return 1
   return 2
+}
+
+/** Two neighbouring letters swapped, nothing else: "lnog" / "long". */
+export function isSwap(typed: string, word: string): boolean {
+  if (typed.length !== word.length) return false
+  const diff: number[] = []
+  for (let i = 0; i < typed.length; i++) if (typed[i] !== word[i]) diff.push(i)
+  return diff.length === 2 && diff[1] === diff[0]! + 1 && typed[diff[0]!] === word[diff[1]!] && typed[diff[1]!] === word[diff[0]!]
 }
 
 const ENDINGS = ['s', 'es', 'd', 'ed', 'ing', 'er', 'ers', 'ly']
@@ -288,6 +328,17 @@ export function buildDictionary(wordList: string): Dictionary {
   return addSpellingExtras(parseWordList(wordList))
 }
 
+/** Word starts that make a new word of a known one: "re" + "watched", "back" + "test". */
+const PREFIXES = ['re', 'pre', 'over', 'under', 'non', 'mis', 'un', 'back', 'out', 'fore', 'sub', 'super', 'semi', 'anti', 'counter', 'cross', 'inter', 'post', 'self', 'multi', 'mid', 'up', 'down']
+/** Endings a known word takes: "journal" + "ing", "stop" + "ed". */
+const SUFFIXES = new Set(['s', 'es', 'd', 'ed', 'ing', 'er', 'ers', 'ly'])
+
+/** Is `rest` an ending, possibly after the last letter of `stem` doubled ("stop" + "ped")? */
+function isEnding(stem: string, rest: string): boolean {
+  if (SUFFIXES.has(rest)) return true
+  return rest.length >= 2 && rest.charAt(0) === stem.charAt(stem.length - 1) && SUFFIXES.has(rest.slice(1))
+}
+
 /** What the English list leaves out, added to a dictionary read from it. */
 export function addSpellingExtras(dictionary: Dictionary): Dictionary {
   for (const word of ENGLISH_EXTRAS) dictionary.add(word, word.includes("'") ? 10 : 20)
@@ -322,6 +373,48 @@ export class Speller {
   /** A hyphenated word the dictionary knows as a whole (e.g. "x-ray"). */
   knowsWhole = (word: string): boolean => this.dictionary?.level(word) !== undefined || lookupTerm(word) !== null
 
+  /** A word the checker knows (lower case): in the list, a trading term, shorthand or the user's. */
+  private knows = (lower: string): boolean => this.dictionary?.level(lower) !== undefined || lookupTerm(lower) !== null || CASUAL_WORD_SET.has(lower) || this.user.has(lower)
+
+  /** A correct British spelling of a word the list has in its American spelling. */
+  private isBritish(lower: string): boolean {
+    return this.dictionary !== null && americanSpelling(lower, (word) => this.dictionary!.level(word) !== undefined) !== null
+  }
+
+  /**
+   * The ways a word is made of known parts: a prefix and a word ("re" + "watched"), two words
+   * ("fake" + "out", "back" + "test"), or a word and an ending ("journal" + "ing"). Such a word
+   * is most likely meant as typed even when the list lacks it.
+   */
+  private compoundSplits(lower: string): Array<{ head: string; tail: string; prefix: boolean }> {
+    const out: Array<{ head: string; tail: string; prefix: boolean }> = []
+    for (let i = 2; i <= lower.length - 1; i++) {
+      const head = lower.slice(0, i)
+      const tail = lower.slice(i)
+      const prefix = PREFIXES.includes(head)
+      if (prefix && tail.length >= 3 && this.knows(tail)) out.push({ head, tail, prefix })
+      else if (head.length >= 3 && this.knows(head) && ((tail.length >= 3 && this.knows(tail)) || SUFFIXES.has(tail))) out.push({ head, tail, prefix: false })
+    }
+    return out
+  }
+
+  /**
+   * May a word made of known parts be corrected to `word`? Only when the correction keeps the
+   * first part and changes no more than its ending: "enterring" -> "entering", "stoped" ->
+   * "stopped", "transfering" -> "transferring", but never "journaling" -> "journalist",
+   * "backtest" -> "backrest" or "rewatched" -> "reached".
+   */
+  private keepsParts(lower: string, word: string): boolean {
+    const splits = this.compoundSplits(lower)
+    if (splits.length === 0) return true
+    const target = word.toLowerCase()
+    return splits.some(({ head, prefix }) => {
+      if (prefix) return false
+      const stems = [head, ...(head.endsWith('e') ? [head.slice(0, -1)] : []), ...(head.endsWith('y') ? [`${head.slice(0, -1)}i`] : [])]
+      return stems.some((stem) => target.startsWith(stem) && isEnding(stem, target.slice(stem.length)))
+    })
+  }
+
   /** Is this word fine as typed? */
   check(word: string, context: WordContext = NO_CONTEXT): boolean {
     if (!this.dictionary || !LETTER.test(word)) return true
@@ -337,6 +430,7 @@ export class Speller {
     if (lower === 'i') return word === 'I'
     const form = this.dictionary.form(lower)
     if (form !== undefined) return form === lower || word === form || isAllCaps(word)
+    if (this.isBritish(lower)) return true
     // Not a known word. A capitalised one mid-sentence is a name; at the start of a sentence
     // it is only flagged when it is clearly a misspelling ("Imapatient").
     if (isCapitalised(word) && !context.sentenceStart) return true
@@ -371,6 +465,7 @@ export class Speller {
     if (hasInnerCapital(word) || !this.dictionary) return null
     const form = this.dictionary.form(lower)
     if (form !== undefined) return form === lower || word === form || isAllCaps(word) ? null : form
+    if (this.isBritish(lower)) return null
     if (isCapitalised(word) && !context.sentenceStart) return null
     if (letterCount(word) <= 2) return null
     const guess = this.guess(lower)
@@ -397,6 +492,8 @@ export class Speller {
 
   private ambiguousIsTerm(lower: string, context: WordContext): boolean {
     if (lower === 'am' || lower === 'pm') return (context.previous !== null && SESSION_NEIGHBOURS.has(context.previous)) || (context.next !== null && SESSION_NEIGHBOURS.has(context.next))
+    // "pd array" is always the PD array.
+    if ((lower === 'pd' || lower === 'pds') && (context.next === 'array' || context.next === 'arrays')) return true
     return context.marketSentence
   }
 
@@ -439,7 +536,13 @@ export class Speller {
       const unsure =
         best.distance === 2 &&
         ((second !== undefined && second.distance === 2 && second.boosted === best.boosted && second.level === best.level) || (letters < 6 && best.word.length === lower.length))
-      if (!unsure) result = best.word
+      // A word of four letters or fewer is shorthand as often as a slip ("avg", "vol", "acct",
+      // "eval"): only two neighbouring letters swapped ("lnog", "liek") is fixed; anything else
+      // is underlined and suggested, never changed.
+      const short = letters <= 4 && !isSwap(lower, best.word.toLowerCase())
+      // A word made of known parts ("journaling", "backtest", "fakeout") is kept as typed,
+      // unless the correction only fixes its ending ("stoped" -> "stopped").
+      if (!unsure && !short && this.keepsParts(lower, best.word)) result = best.word
     }
     this.guesses.set(lower, result)
     return result
