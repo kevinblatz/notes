@@ -24,10 +24,12 @@ import {
 } from '@shared/risk'
 import { clockTime } from '@shared/sessionLog'
 import { useEscape } from '../lib/escape'
+import { loadSpelling } from '../lib/spelling'
 import { updatePreferences } from '../state/actions'
 import { copyContractsAndClose, endCapture, registerQuickNoteFlush, submitQuickNote } from '../state/hotkeys'
 import { cleanMessage } from '../state/saver'
 import { useStore, type CaptureState } from '../state/store'
+import { SpellInput } from './SpellInput'
 import { Segmented } from './ui'
 
 export function HotkeyPanels() {
@@ -95,6 +97,10 @@ function QuickNoteStrip({ capture }: { capture: CaptureState }) {
   useLayoutEffect(() => {
     input.current?.focus({ preventScroll: true })
   }, [capture.presses])
+  // The strip underlines misspellings with the app's own checker (Chromium's is off).
+  useEffect(() => {
+    void loadSpelling().catch(() => undefined)
+  }, [])
 
   useEscape(true, () => {
     if (!busy) endCapture()
@@ -139,8 +145,9 @@ function QuickNoteStrip({ capture }: { capture: CaptureState }) {
       <form className="quick-note" onSubmit={(event) => void submit(event)} data-testid="quick-note">
         <PenLine className="quick-note-icon" size={15} aria-hidden="true" />
         <span className="quick-note-time" title="The time this line will carry">{clockTime(capture.at)}</span>
-        <input
+        <SpellInput
           ref={input}
+          fieldClassName="quick-note-field"
           className="quick-note-input"
           type="text"
           value={text}
@@ -150,7 +157,6 @@ function QuickNoteStrip({ capture }: { capture: CaptureState }) {
           aria-describedby="quick-note-hint"
           aria-invalid={error ? true : undefined}
           readOnly={busy}
-          spellCheck
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
             // Enter adds the line (Ctrl+Enter too, so it never reaches a note open underneath).

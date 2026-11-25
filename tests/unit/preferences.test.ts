@@ -3,6 +3,7 @@ import {
   clampOpacity,
   formatOpacity,
   loadPreferences,
+  MAX_USER_WORDS,
   mergePreferences,
   MIN_WINDOW_OPACITY,
   OPACITY_PRESETS,
@@ -275,5 +276,30 @@ describe('opacityMenuChoices', () => {
   it('does not change the presets', () => {
     opacityMenuChoices(0.4)
     expect(OPACITY_PRESETS).toEqual([1, 0.85, 0.7, 0.5])
+  })
+})
+
+describe('spelling preferences', () => {
+  it('underline misspellings and start with an empty dictionary', () => {
+    expect(DEFAULT_PREFERENCES.spellcheck).toBe(true)
+    expect(DEFAULT_PREFERENCES.spellingWords).toEqual([])
+    expect(loadPreferences(undefined)).toMatchObject({ spellcheck: true, spellingWords: [] })
+  })
+
+  it('keep the switch and the user’s words, checked like every other preference', () => {
+    const next = mergePreferences(DEFAULT_PREFERENCES, { spellcheck: false, spellingWords: [' Kenzie ', 'kenzie', 'Smoove', 'two words', 7, ''] })
+    expect(next.spellcheck).toBe(false)
+    expect(next.spellingWords).toEqual(['Kenzie', 'Smoove'])
+    // Bad values leave what was stored.
+    expect(mergePreferences(next, { spellcheck: 'no' }).spellcheck).toBe(false)
+    expect(mergePreferences(next, {}).spellingWords).toEqual(['Kenzie', 'Smoove'])
+    expect(mergePreferences(next, { spellingWords: 'Kenzie' }).spellingWords).toEqual([])
+    // A stored settings row from before this version gets the defaults.
+    expect(loadPreferences({ theme: 'paper' })).toMatchObject({ theme: 'paper', spellcheck: true, spellingWords: [] })
+  })
+
+  it('cap the dictionary', () => {
+    const many = Array.from({ length: MAX_USER_WORDS + 20 }, (_, i) => `word${String.fromCharCode(97 + (i % 26))}${i}`)
+    expect(mergePreferences(DEFAULT_PREFERENCES, { spellingWords: many }).spellingWords).toHaveLength(MAX_USER_WORDS)
   })
 })

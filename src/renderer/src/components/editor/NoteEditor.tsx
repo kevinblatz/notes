@@ -4,8 +4,9 @@
  * checking the chart leaves the draft, the caret and any open control exactly as they were.
  */
 import type { Editor } from '@tiptap/core'
+import { closeHistory } from '@tiptap/pm/history'
 import { EditorContent, useEditor } from '@tiptap/react'
-import { ArrowLeft, ClipboardPaste, Copy, Plus, Scissors, Tag, TextSelect, Type, X } from 'lucide-react'
+import { ArrowLeft, BookPlus, ClipboardPaste, Copy, Plus, Scissors, Tag, TextSelect, Type, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { emptyDoc, SUGGESTED_TAGS, sanitizeTags } from '@shared/content'
 import { collectTags } from '@shared/search'
@@ -14,14 +15,28 @@ import { api } from '../../lib/api'
 import { overlayDepth, useEscape } from '../../lib/escape'
 import { ACCEPT_ATTRIBUTE, hasFiles, imageFilesFrom } from '../../lib/images'
 import { sanitizePastedHtml } from '../../lib/pasteSanitizer'
-import { noteSaved, noteSaveState, returnToBoard, setActiveEditor, setActiveSaver, toast, type EditorHandle } from '../../state/actions'
+import { getSpeller, loadSpelling, useSpeller } from '../../lib/spelling'
+import { announce, noteSaved, noteSaveState, returnToBoard, setActiveEditor, setActiveSaver, toast, updatePreferences, type EditorHandle } from '../../state/actions'
 import { NoteSaver, type SaveState } from '../../state/saver'
 import { getState, useStore, type View } from '../../state/store'
-import { MenuList, Popover } from '../ui'
+import { inputMissAt, SpellInput } from '../SpellInput'
+import { MenuList, Popover, type MenuEntry } from '../ui'
+import { useDrawingSession } from './drawingSession'
 import { appendLogEntries, buildExtensions, insertImageFiles, positionFromHint, syncSelectionFromPage } from './extensions'
 import { FormatBar, SelectionBubble } from './FormatBar'
+import { followTitleThroughUndo, isOrganizeShortcut, organizeOpenNote, type TitleAccess } from './organizeAction'
+import { spellingExtension, spellKey, wordAtPosition } from './spelling'
 
 type NoteView = Extract<View, { mode: 'note' }>
+
+/** A misspelled word the context menu was opened on, with what it could be instead. */
+interface SpellingTarget {
+  field: 'text' | 'title'
+  from: number
+  to: number
+  word: string
+  suggestions: string[]
+}
 
 function reportImageErrors(errors: string[]): void {
   if (errors.length > 0) toast(errors[0]!, { kind: 'error', duration: 8000 })
@@ -77,7 +92,8 @@ function TagRow({ tags, onChange, onSubmit }: { tags: string[]; onChange: (next:
       ))}
       {adding ? (
         <span className="tag-adder">
-          <input
+          <SpellInput
+            fieldClassName="tag-input-field"
             autoFocus
             type="text"
             value={value}
@@ -125,7 +141,7 @@ export function NoteEditor({ view }: { view: NoteView }) {
   const [tags, setTags] = useState<string[]>(initial?.tags ?? [])
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' })
   const [dropActive, setDropActive] = useState(false)
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; spelling: SpellingTarget | null } | null>(null)
   const titleRef = useRef(title)
   const tagsRef = useRef(tags)
   const saverRef = useRef<NoteSaver | null>(null)
@@ -136,13 +152,15 @@ export function NoteEditor({ view }: { view: NoteView }) {
 
   const editorRef = useRef<Editor | null>(null)
   const extensions = useMemo(
-    () =>
-      buildExtensions({
+    () => [
+      ...buildExtensions({
         onSubmit: () => {
           // With a menu open above the note, Ctrl+Enter belongs to that menu, not to the note.
           if (overlayDepth() <= 1) void returnToBoard()
         }
       }),
+      spellingExtension(() => ({ speller: getSpeller(), enabled: getState().prefs.spellcheck }))
+    ],
     []
   )
 
@@ -150,7 +168,8 @@ export function NoteEditor({ view }: { view: NoteView }) {
     extensions,
     content: initial?.content ?? emptyDoc(),
     editorProps: {
-      attributes: { class: 'prose editor-prose', 'aria-label': 'Note text', role: 'textbox', 'aria-multiline': 'true' },
+      // The app's own spelling checker underlines; Chromium's would flag every FVG and NWOG.
+      attributes: { class: 'prose editor-prose', 'aria-label': 'Note text', role: 'textbox', 'aria-multiline': 'true', spellcheck: 'false' },
       transformPastedHTML: sanitizePastedHtml,
       handlePaste: (_view, event) => {
         // Read the clipboard only now, at the moment of pasting.
@@ -184,6 +203,55 @@ export function NoteEditor({ view }: { view: NoteView }) {
     onUpdate: () => saverRef.current?.touch()
   })
   editorRef.current = editor
+
+  // The title as Organize (and its undo) reads and writes it.
+  const titleAccess = useRef<TitleAccess>({
+    get: () => titleRef.current,
+    set: (next) => {
+      setTitle(next)
+      titleRef.current = next
+      saverRef.current?.touch()
+    }
+  }).current
+
+  // The word list loads the first time a note opens; the underlines follow it, the user's own
+  // words and the underline switch in Settings.
+  const speller = useSpeller()
+  const spellingOn = useStore((s) => s.prefs.spellcheck)
+  useEffect(() => {
+    void loadSpelling().catch(() => undefined)
+  }, [])
+  useEffect(() => {
+    if (editor.isDestroyed) return
+    const current = spellKey.getState(editor.state)
+    if (current && current.speller === speller && current.enabled === spellingOn) return
+    editor.view.dispatch(editor.state.tr.setMeta(spellKey, { speller, enabled: spellingOn }).setMeta('addToHistory', false))
+  }, [editor, speller, spellingOn])
+
+  useEffect(() => followTitleThroughUndo(editor, titleAccess), [editor, titleAccess])
+
+  const organizing = useRef(false)
+  const organize = (): void => {
+    if (organizing.current || editor.isDestroyed) return
+    organizing.current = true
+    void organizeOpenNote(editor, titleAccess).finally(() => {
+      organizing.current = false
+    })
+  }
+  const organizeNow = useRef(organize)
+  organizeNow.current = organize
+  // Ctrl+Shift+O works wherever the keyboard is in the note, bar shown or folded away, like
+  // Ctrl+Shift+D. It waits while a menu or the drawing space is open.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.isComposing || !isOrganizeShortcut(event)) return
+      event.preventDefault()
+      if (overlayDepth() > 1 || useDrawingSession.getState().target) return
+      organizeNow.current()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   // One saver per editing session.
   useEffect(() => {
@@ -276,15 +344,58 @@ export function NoteEditor({ view }: { view: NoteView }) {
     void insertImageFiles(editor, files, editor.state.doc.content.size).then(reportImageErrors)
   }
 
+  /** The misspelled word under the pointer, in the text or the title, if spelling is on. */
+  const spellingTargetAt = (target: HTMLElement, x: number, y: number): SpellingTarget | null => {
+    const checker = getSpeller()
+    if (!checker.ready || !getState().prefs.spellcheck) return null
+    if (target.closest('.ProseMirror')) {
+      const at = editor.view.posAtCoords({ left: x, top: y })
+      const word = at ? wordAtPosition(editor.state, at.pos, checker) : null
+      if (!word?.misspelled) return null
+      return { field: 'text', from: word.from, to: word.to, word: word.word, suggestions: checker.suggest(word.word, word.context) }
+    }
+    const miss = inputMissAt(target, x, y)
+    return miss ? { field: 'title', ...miss, suggestions: checker.suggest(miss.word) } : null
+  }
+
   const onContextMenu = (event: ReactMouseEvent): void => {
     const target = event.target as HTMLElement
     if (!target.closest('.ProseMirror, .focus-title')) return
     event.preventDefault()
-    setMenu({ x: event.clientX, y: event.clientY })
+    setMenu({ x: event.clientX, y: event.clientY, spelling: spellingTargetAt(target, event.clientX, event.clientY) })
+  }
+
+  /** Replace a misspelled word with a suggestion: one undo step in the text. */
+  const replaceWord = (spelling: SpellingTarget, replacement: string): void => {
+    if (spelling.field === 'title') {
+      const current = titleRef.current
+      if (current.slice(spelling.from, spelling.to) !== spelling.word) return
+      titleAccess.set(current.slice(0, spelling.from) + replacement + current.slice(spelling.to))
+      return
+    }
+    if (editor.isDestroyed || editor.state.doc.textBetween(spelling.from, spelling.to) !== spelling.word) return
+    editor.view.dispatch(closeHistory(editor.state.tr.insertText(replacement, spelling.from, spelling.to)))
+    editor.view.dispatch(closeHistory(editor.state.tr))
+    editor.view.focus()
+  }
+
+  const addToDictionary = (word: string): void => {
+    void updatePreferences({ spellingWords: [...getState().prefs.spellingWords, word] })
+    announce(`Added ${word} to your dictionary.`)
   }
 
   const hasSelection = !editor.state.selection.empty
   const closeMenu = (): void => setMenu(null)
+  const spelling = menu?.spelling ?? null
+  const spellingEntries: MenuEntry[] = spelling
+    ? [
+        ...(spelling.suggestions.length > 0
+          ? spelling.suggestions.map((suggestion): MenuEntry => ({ label: suggestion, strong: true, onSelect: () => replaceWord(spelling, suggestion) }))
+          : [{ kind: 'label', label: 'No suggestions' } as const]),
+        { label: 'Add to dictionary', icon: <BookPlus size={15} />, onSelect: () => addToDictionary(spelling.word) },
+        { kind: 'separator' }
+      ]
+    : []
 
   return (
     <section className="focus-view" aria-label="Note" data-testid="focus-view">
@@ -324,7 +435,8 @@ export function NoteEditor({ view }: { view: NoteView }) {
               The app did not close normally last time. This is the note you had open, as it was last saved; anything typed in the final moment before it closed may be missing.
             </p>
           ) : null}
-          <input
+          <SpellInput
+            fieldClassName="focus-title-field"
             className="focus-title"
             type="text"
             value={title}
@@ -359,7 +471,7 @@ export function NoteEditor({ view }: { view: NoteView }) {
         </div>
       </div>
 
-      <FormatBar editor={editor} onAddImage={() => fileInput.current?.click()} />
+      <FormatBar editor={editor} onAddImage={() => fileInput.current?.click()} onOrganize={organize} />
       <SelectionBubble editor={editor} />
 
       <input
@@ -382,6 +494,7 @@ export function NoteEditor({ view }: { view: NoteView }) {
           onDone={closeMenu}
           keepFocus
           entries={[
+            ...spellingEntries,
             { label: 'Cut', icon: <Scissors size={15} />, hint: 'Ctrl+X', disabled: !hasSelection, onSelect: () => void api.edit('cut') },
             { label: 'Copy', icon: <Copy size={15} />, hint: 'Ctrl+C', disabled: !hasSelection, onSelect: () => void api.edit('copy') },
             { label: 'Paste', icon: <ClipboardPaste size={15} />, hint: 'Ctrl+V', onSelect: () => void api.edit('paste') },

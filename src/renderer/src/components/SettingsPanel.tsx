@@ -2,6 +2,7 @@
 import { FONT_KEYS, FONT_LABELS, FONT_SIZES } from '@shared/content'
 import { OPACITY_SHORTCUT_LABELS, opacityPercent, THEME_LABELS, THEMES } from '@shared/preferences'
 import type { DockSide, FontKey, ReducedMotion, ThemeKey } from '@shared/types'
+import { X } from 'lucide-react'
 import { api } from '../lib/api'
 import { openPanel, setSolidWhileInUse, toast, updatePreferences } from '../state/actions'
 import { setState, useStore } from '../state/store'
@@ -34,6 +35,42 @@ function OpacitySettings() {
           <div className="setting-help">While see-through, the notes turn solid when the pointer is on them or you type in them.</div>
         </div>
         <Switch label="Solid while I use it" checked={solidWhileInUse} onChange={setSolidWhileInUse} />
+      </div>
+    </>
+  )
+}
+
+/** The underline switch and the words added with "Add to dictionary". */
+function SpellingSettings() {
+  const on = useStore((s) => s.prefs.spellcheck)
+  const words = useStore((s) => s.prefs.spellingWords)
+  const sorted = [...words].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  return (
+    <>
+      <div className="setting-row">
+        <div>
+          <div className="setting-label">Underline misspelled words</div>
+          <div className="setting-help">The app’s own checker, which knows trading terms like FVG, NWOG and CHoCH. Organize (Ctrl+Shift+O) corrects words either way.</div>
+        </div>
+        <Switch label="Underline misspelled words" checked={on} onChange={(next) => void updatePreferences({ spellcheck: next })} />
+      </div>
+      <div className="setting-block">
+        <div className="setting-label">Your dictionary</div>
+        <div className="setting-help">
+          {words.length === 0 ? 'Empty. Right-click an underlined word and choose Add to dictionary: it is never underlined or changed again.' : 'Never underlined or changed by Organize.'}
+        </div>
+        {words.length > 0 ? (
+          <ul className="word-list" aria-label="Your dictionary">
+            {sorted.map((word) => (
+              <li key={word} className="word-chip">
+                <span>{word}</span>
+                <button type="button" aria-label={`Remove ${word} from your dictionary`} title="Remove" onClick={() => void updatePreferences({ spellingWords: words.filter((w) => w !== word) })}>
+                  <X size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     </>
   )
@@ -125,6 +162,11 @@ export function SettingsPanel() {
             ))}
           </select>
         </div>
+      </section>
+
+      <section className="setting-section" aria-label="Spelling">
+        <h2>Spelling</h2>
+        <SpellingSettings />
       </section>
 
       <section className="setting-section">

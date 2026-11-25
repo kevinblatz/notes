@@ -128,6 +128,10 @@ export interface Preferences {
   riskInstrument: InstrumentKey
   riskCents: number | null
   riskUnit: StopUnit
+  /** Underline misspelled words (the app's own checker; Organize works either way). */
+  spellcheck: boolean
+  /** Words added to the spelling dictionary with "Add to dictionary": never underlined or changed. */
+  spellingWords: string[]
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -150,7 +154,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   candleChime: true,
   riskInstrument: 'MES',
   riskCents: null,
-  riskUnit: 'points'
+  riskUnit: 'points',
+  spellcheck: true,
+  spellingWords: []
 }
 
 export interface ShortcutStatus {

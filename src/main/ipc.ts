@@ -10,6 +10,7 @@ import { isValidAccelerator } from '@shared/accelerator'
 import { isOpenableExternalUrl } from '@shared/content'
 import { bindingsFromPreferences, HOTKEY_IDS, preferencesFromBindings } from '@shared/hotkeys'
 import { IPC } from '@shared/ipc'
+import { MAX_USER_WORD_LENGTH, MAX_USER_WORDS } from '@shared/preferences'
 import { MAX_CONTRACTS } from '@shared/risk'
 import type {
   AppInfo,
@@ -71,6 +72,9 @@ const zSetHotkeyEnabled = z.object({ id: zHotkeyId, enabled: z.boolean() })
 const zMoment = z.number().int().nonnegative().max(8.64e15)
 const zContracts = z.number().int().nonnegative().max(MAX_CONTRACTS)
 const zToken = z.number().int().positive()
+// The spelling dictionary: a list of short strings. Each word is then checked again (and the
+// list capped) by mergePreferences, as every other preference is.
+const zSpellingWords = z.array(z.string().max(MAX_USER_WORD_LENGTH * 4)).max(MAX_USER_WORDS * 2)
 
 function toBytes(value: ArrayBuffer | ArrayBufferView): Uint8Array {
   if (value instanceof ArrayBuffer) return new Uint8Array(value)
@@ -186,6 +190,7 @@ export function registerIpc(context: IpcContext): void {
     delete patch.shortcut
     delete patch.shortcutEnabled
     delete patch.hotkeys
+    if ('spellingWords' in patch && !zSpellingWords.safeParse(patch.spellingWords).success) delete patch.spellingWords
     if (patch.launchAtStartup === true && !autostartSupported()) delete patch.launchAtStartup
     const next = library.setPreferences(patch)
     context.applyPreferences(previous, next)

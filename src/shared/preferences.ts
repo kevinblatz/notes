@@ -199,7 +199,31 @@ export function mergePreferences(base: Preferences, patch: unknown): Preferences
   if (p.riskCents === null) next.riskCents = null
   else if (typeof p.riskCents === 'number' && Number.isSafeInteger(p.riskCents) && p.riskCents > 0 && p.riskCents <= MAX_RISK_CENTS) next.riskCents = p.riskCents
   if (p.riskUnit === 'points' || p.riskUnit === 'ticks') next.riskUnit = p.riskUnit
+  if (typeof p.spellcheck === 'boolean') next.spellcheck = p.spellcheck
+  if (p.spellingWords !== undefined) next.spellingWords = sanitizeUserWords(p.spellingWords)
   return next
+}
+
+/** Most words a user can add to their own spelling dictionary. */
+export const MAX_USER_WORDS = 500
+/** Longest word that can be added. */
+export const MAX_USER_WORD_LENGTH = 48
+
+/** Keep only usable dictionary words: single words with a letter, trimmed, no duplicates (ignoring case), capped. */
+export function sanitizeUserWords(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of value) {
+    if (typeof raw !== 'string') continue
+    const word = raw.trim()
+    const key = word.toLowerCase()
+    if (!word || word.length > MAX_USER_WORD_LENGTH || /\s/.test(word) || !/\p{L}/u.test(word) || seen.has(key)) continue
+    seen.add(key)
+    out.push(word)
+    if (out.length >= MAX_USER_WORDS) break
+  }
+  return out
 }
 
 export function loadPreferences(stored: unknown): Preferences {

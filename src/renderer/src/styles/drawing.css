@@ -33,10 +33,22 @@
   opacity: 0;
   transform: translateY(8px);
 }
-/* Room for the Draw button at half-screen widths without wrapping onto a second line. */
+/* Room for the Draw and Organize buttons at half-screen widths (680 px) without wrapping onto
+   a second line: tighter gaps, and the style and font menus a little narrower until they
+   name something longer. */
 @media (max-width: 760px) {
   .format-bar {
-    column-gap: 7px;
+    column-gap: 5px;
+    padding-inline: 6px;
+  }
+  .format-bar .bar-dropdown {
+    padding: 0 4px 0 7px;
+  }
+  .format-bar .bar-dropdown[aria-label='Paragraph style'] {
+    min-width: 72px !important;
+  }
+  .format-bar .bar-dropdown[aria-label='Font'] {
+    min-width: 62px !important;
   }
 }
 

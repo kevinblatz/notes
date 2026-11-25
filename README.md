@@ -101,7 +101,9 @@ hotkey keeps the combination it had.
 | **Ctrl + Shift + V** | Paste as plain text. |
 | Drag an image file in | Onto empty board space: a new image note there. Into an open note: at that spot. |
 | Select text | A small bar appears for bold, italic, underline, strikethrough, colour, highlight and links. |
-| Bar under the note | Paragraph style, font, size, Draw, lists, checklists, link, add image, undo and redo. The small arrow on its edge folds it away. |
+| Bar under the note | Paragraph style, font, size, Draw, Organize, lists, checklists, link, add image, undo and redo. The small arrow on its edge folds it away. |
+| **Organize** (the wand beside Draw), or **Ctrl + Shift + O** | Fix the spelling, grammar and punctuation of the whole note, and put back together a thought that strayed off and came back. See *Organize and spelling* below. |
+| Right-click an underlined word | Pick one of up to four suggestions, or *Add to dictionary*. |
 | Click an image, drag its corner | Resize it (the proportions are kept). Type under it to add a caption. |
 | **Ctrl + click** a link while editing | Open it in your browser. On the board a plain click opens it. |
 | *Add tag*, under the note | Label the note (Rules, Setups and Journal are suggested; any word works). Find can filter by tag. |
@@ -109,6 +111,74 @@ hotkey keeps the combination it had.
 Notes save themselves as you type (within about half a second). *Log note* is just the way back to the board; it is not the
 only thing that saves. A new note you leave completely empty is thrown away; a note with only a
 screenshot is kept.
+
+**Organize and spelling**
+
+Notes are checked by the app's own spelling checker. It works offline and knows how traders
+write. A misspelled word gets a soft wavy underline once you have finished typing it (in the
+note, its title, image captions, tags and the quick note strip). Never underlined:
+
+- ICT and trading terms: NWOG, NDOG, FVG, IFVG, BISI, SIBI, BPR, OB, BB, MB, RB, VI, OTE, SMT, MSS,
+  BOS, CHoCH, CISD, PDH, PDL, PWH, PWL, PDA, EQH, EQL, ERL, IRL, DOL, HTF, LTF, SSL, BSL, ADR, AMD,
+  PO3, CBDR, IPDA, MMXM, MMBM, MMSM, SB, KZ, FOMC, CPI, NFP, PPI, VWAP, RTH, ETH, DXY, SPX, ES, NQ,
+  MES, MNQ, YM, RTY and more, with their plurals and possessives (FVGs, IFVG's), and words like
+  killzone, Judas swing, turtle soup, unicorn, silver bullet, displacement, rebalance, premarket.
+- Numbers, prices ($500, -$120, 6,123.25), times (9:30, 09:31:05, 10am), percentages,
+  timeframes and R multiples (5m, 4H, M15, +2R), tickers (ES1!), web addresses and emails, text
+  in a link or in code.
+- Acronyms of two to six capitals, words with a capital inside (TradingView), a capitalised name
+  in the middle of a sentence (Powell), and the words you added to your dictionary.
+
+| Do this | To |
+| --- | --- |
+| Right-click an underlined word | See up to four suggestions at the top of the menu. Click one to replace the word (one **Ctrl + Z** puts it back). **Add to dictionary** means the word is never underlined or changed again. |
+| **Organize** (the wand beside Draw in the bar under the note), or **Ctrl + Shift + O** | Fix the whole note in one go, and regroup thoughts that strayed. The shortcut also works while the formatting bar is folded away. A message says what was done (*Organized: 25 fixes, 1 thought regrouped*, *Fixed 6 words*, or *Already tidy*); the words that changed glow for a moment. |
+| **Ctrl + Z** right after, or *Undo* in the message | Put the note back exactly as it was, title included. **Ctrl + Y** does it again. |
+| Settings (**Ctrl + ,**) → *Spelling* | Switch the underlines off or on, and see or remove the words you added. |
+
+What Organize does, all on your computer (it is a set of fixed rules, not an AI service). It is
+deliberately light: your note keeps its wording and its shape, it is only fixed and, where a
+thought wandered off and came back, put back together.
+
+1. **Fixes words** it is sure about: displacment → displacement, imapatient → impatient,
+   tommorow → tomorrow; dont → don't, im → I'm, thats → that's, a lone i → I; trading terms in
+   their usual form (fvg → FVG, ifvgs → IFVGs, nwog → NWOG, choch → CHoCH, asia → Asia, +2r → +2R);
+   a few shorthands (bc and b/c → because, w/ → with, w/o → without, tmrw → tomorrow, b4 → before);
+   "re entered" → "re-entered", "to early" → "too early", "the the" → "the". A short code that is
+   also a word (am, es, ob, eth ...) is only written as a term in a sentence about the market:
+   "ny am killzone" becomes "NY AM killzone", "I am late" stays. A word it is not sure about stays
+   as you typed it, still underlined. Bold, links, highlights and colours are kept.
+2. **Fixes punctuation**: a capital at the start of each sentence, single spaces, no space before
+   a comma or full stop, a full stop at the end of a sentence that has none, and a colon after a
+   label ("lesson dont chase" → "Lesson: don't chase"). A long line typed without any punctuation
+   is split into sentences, carefully: only before words like *then*, *but* or *so*, or after
+   *lol*, and only where both parts are at least five words long. Headings, list items, short
+   labels and session log lines get no full stop.
+3. **Puts strayed thoughts back together.** Each sentence is read for what it is about: the setup
+   (your plan and bias, and what the market did), your trades, your mindset, or a lesson or
+   rule. When your writing wanders to another topic and later comes back to the first one, the
+   sentences about the same topic are brought together: one plain paragraph per topic, the topics
+   in the order you first wrote about them, the sentences in your order within each. A sentence
+   that is not clearly about anything, or that names the same ICT term or price as the one
+   before it, stays with the sentence before it. No headings or bullets are added. When nothing
+   strayed, your paragraphs stay exactly as they were, so a paragraph about one thing (a mindset
+   reflection) is only fixed.
+
+For example, *"nwog at 6120 was the draw ... took long at 6104 in the ifvg ... second entry worked
++2r. lesson dont chase the first push wait for mss. felt calm after tho. ny am killzone was clean,
+silver bullet 10-11 gave the move"* becomes four paragraphs: the setup and the plan (with the
+killzone sentence from the end back beside them), the trades, the lesson, and the mindset.
+
+Never moved and never merged: your own headings, lists, checklists, quotes and code (their text
+is fixed, nothing else), pictures and drawings, session log lines (`09:31:05 — London high
+taken` stays one line per entry, in time order), and a line that is only a label (*Lessons:*)
+together with the lines under it, up to the next blank line. Thoughts are only regrouped between
+these, so everything keeps its place around them. Organizing an organized note changes nothing,
+and a line you add at the end later joins its topic the next time.
+
+The word list (about 77,000 English words) loads in the background the first time a note opens;
+until it is in, nothing is underlined. Chromium's own spelling checker is switched off, so it
+never underlines trading terms and never downloads dictionaries.
 
 **Arranging**
 
@@ -156,7 +226,7 @@ Resizing the window while the sheet is open never loses or stretches anything yo
 
 | Do this | To |
 | --- | --- |
-| The small arrow tab on the top-right edge of the bar under a note (*Hide formatting*) | Fold the bar away so the note gets the room. A small tab stays at the bottom-right edge; click it (*Show formatting*) to bring the bar back. Your choice is remembered for every note and after a restart. Every keyboard shortcut, the selection bar and Ctrl + Shift + D keep working while the bar is hidden. |
+| The small arrow tab on the top-right edge of the bar under a note (*Hide formatting*) | Fold the bar away so the note gets the room. A small tab stays at the bottom-right edge; click it (*Show formatting*) to bring the bar back. Your choice is remembered for every note and after a restart. Every keyboard shortcut, the selection bar, Ctrl + Shift + D (Draw) and Ctrl + Shift + O (Organize) keep working while the bar is hidden. |
 
 **See-through notes**
 
@@ -253,8 +323,8 @@ Every push builds the app on a real Windows machine and runs three things there
 
 | Check | What it covers |
 | --- | --- |
-| Unit tests | Layout rules (no note is ever lost or overwritten), storage, stale-save rejection, Trash, backup round trip and import validation, search, window placement on made-up monitor arrangements. |
-| Desktop tests | The real app driven through the acceptance checks: writing and autosave, screenshots by paste, drop and file picker, formatting surviving a restart, rearranging, narrow and wide layouts, pins, search, Trash, backup and import, docking, hide and show, drafts surviving hide, quit and a crash, a failed save, an unavailable shortcut, a window left off screen, and performance with 300 notes and 80 screenshots. |
+| Unit tests | Layout rules (no note is ever lost or overwritten), storage, stale-save rejection, Trash, backup round trip and import validation, search, window placement on made-up monitor arrangements, the spelling checker and autocorrect, and Organize (with a property test over 300 generated notes: no word or picture lost or duplicated, the same words between the same pictures, pictures kept in their order, and organizing twice gives the same note as once). |
+| Desktop tests | The real app driven through the acceptance checks: writing and autosave, screenshots by paste, drop and file picker, formatting surviving a restart, rearranging, narrow and wide layouts, pins, search, Trash, backup and import, docking, hide and show, drafts surviving hide, quit and a crash, a failed save, an unavailable shortcut, a window left off screen, spelling underlines and suggestions, Organize and its undo (also on a session log and a 2,000-word dump), and performance with 300 notes and 80 screenshots. |
 | Native window check | `scripts/windows-native-check.ps1`, with real mouse and keyboard input against a real Chrome window: the notes are always-on-top and stay put; every click on Chrome gives Chrome the keyboard; the notes never take focus back; typing lands in Chrome; the notes stay above a maximized and a fullscreen Chrome; the global shortcut hides and shows the one window, and hiding gives the keyboard back to Chrome; a second launch does not open a second window; Alt+F4 hides to the tray and gives Chrome the keyboard; the tray icon exists; the trading hotkeys with real key presses (quick note and risk calculator give the keyboard back to Chrome, also from hidden notes; snapshot and see-through never take it; what was typed is in today's log). |
 
 Not verified by automation, so worth a look on your own machine:
@@ -279,7 +349,10 @@ Not verified by automation, so worth a look on your own machine:
   next start is honest about anything that was not), not exercised by a real shutdown.
 
 Known limitations: the app is not code-signed (SmartScreen asks once); search does not read
-text inside screenshots; there is no sync between computers (use Backup and import).
+text inside screenshots; there is no sync between computers (use Backup and import). The
+spelling checker knows US English only, and Organize tells what a sentence is about from the
+words in it, so now and then a sentence moves where you would not have put it (one Ctrl + Z
+undoes it all).
 
 ## Development
 
@@ -291,7 +364,7 @@ npm ci
 | --- | --- |
 | `npm run dev` | Run the app with live reload. Uses a separate "Trading Notes (dev)" data folder. |
 | `npm run typecheck` | Type-check main process, window and tests. |
-| `npm test` | Unit tests: layout rules, storage, backup, search, window placement. |
+| `npm test` | Unit tests: layout rules, storage, backup, search, window placement, spelling and Organize. |
 | `npm run build` | Production build into `out/`. |
 | `npm run test:e2e` | Build, then drive the real app through the acceptance checks (Playwright). On Linux run it under `xvfb-run -a --server-args="-screen 0 1920x1080x24"`: some checks need a full-size screen. |
 | `npm run package:win` | Build the Windows installer and portable app into `release/`. |
@@ -302,7 +375,8 @@ Layout of the source:
 
 | Path | Role |
 | --- | --- |
-| `src/shared/` | Pure logic used everywhere: data model, board layout rules, click and drag targeting, content sanitising, search, window placement. |
+| `src/shared/` | Pure logic used everywhere: data model, board layout rules, click and drag targeting, content sanitising, search, window placement, the spelling checker (`spelling.ts`, `dictionary.ts`, `tradingTerms.ts`, `wordFixes.ts`, `autocorrect.ts`) and Organize (`organize.ts`). |
+| `src/shared/words/` | The spelling word list, generated by `scripts/make-wordlist.mjs` (see *Credits*). |
 | `src/main/` | Electron main process: the window, tray, global shortcut, startup entry, IPC handlers. |
 | `src/main/store/` | Persistence: SQLite (Electron's built-in `node:sqlite`), managed image files, backup and import. No Electron imports, so it is unit-tested directly. |
 | `src/preload/` | The only bridge to the window (`window.tn`). The page has no Node or file access. |
@@ -320,3 +394,12 @@ app below them.
 `extra` field, and the database has a schema version with a migration list
 (`src/main/store/db.ts`). Trade fields can be added as a new kind plus a migration without
 touching how notes are stored, arranged, pinned or searched.
+
+## Credits
+
+The spelling checker's word list is SCOWL (Spell Checker Oriented Word Lists) by Kevin Atkinson
+and its contributors, as packaged in [wordlist-english](https://github.com/jacksonrayhamilton/wordlist-english)
+1.2.1 by Jackson Ray Hamilton (MIT): levels 10 to 60 of its English and American lists, in
+`src/shared/words/en-US.txt`, generated with `scripts/make-wordlist.mjs`. SCOWL's copyright and
+permission notices, and wordlist-english's licence, are in `resources/licenses/wordlist-english.txt`,
+which ships with the app.

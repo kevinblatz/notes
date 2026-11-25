@@ -1,0 +1,93 @@
+/**
+ * The fixed lists behind autocorrect: the slips it always fixes the same way, and the words the
+ * English list leaves out (it holds no names, no capitals and no apostrophes). Everything here
+ * is deliberately conservative: a word that has two plausible meanings is not on these lists.
+ */
+
+/**
+ * Apostrophes left out of contractions. Not here, on purpose, because each is also a word of
+ * its own: lets (it lets me), its, ill, id, wed, well, were, hell, shell, whos (kept: "whose"
+ * is likelier to be meant). "cant" and "wont" are words too, but in a trading journal they are
+ * nearly always can't and won't.
+ */
+export const CONTRACTIONS: Readonly<Record<string, string>> = {
+  dont: "don't", didnt: "didn't", doesnt: "doesn't", dosent: "doesn't", cant: "can't", wont: "won't", isnt: "isn't",
+  wasnt: "wasn't", werent: "weren't", arent: "aren't", couldnt: "couldn't", shouldnt: "shouldn't", wouldnt: "wouldn't",
+  havent: "haven't", hasnt: "hasn't", hadnt: "hadn't", mustnt: "mustn't", neednt: "needn't", aint: "ain't",
+  im: "I'm", ive: "I've", youre: "you're", youve: "you've", youll: "you'll", youd: "you'd",
+  theyre: "they're", theyve: "they've", theyll: "they'll", theyd: "they'd", weve: "we've",
+  thats: "that's", whats: "what's", theres: "there's", heres: "here's", wheres: "where's", hows: "how's",
+  shes: "she's", hes: "he's", itll: "it'll", thatll: "that'll",
+  wouldve: "would've", couldve: "could've", shouldve: "should've", mightve: "might've", mustve: "must've", yall: "y'all"
+}
+
+/** Common misspellings with exactly one intended word. */
+export const SLIPS: Readonly<Record<string, string>> = {
+  teh: 'the', hte: 'the', adn: 'and', nad: 'and', taht: 'that', thta: 'that', wiht: 'with', jsut: 'just', waht: 'what',
+  yuo: 'you', knwo: 'know', konw: 'know', recieve: 'receive', recieved: 'received', recieving: 'receiving',
+  seperate: 'separate', seperately: 'separately', definately: 'definitely', definatly: 'definitely', defintely: 'definitely',
+  alot: 'a lot', wich: 'which', becuase: 'because', beacuse: 'because', becasue: 'because', untill: 'until',
+  occured: 'occurred', occuring: 'occurring', thier: 'their', freind: 'friend', beleive: 'believe', wierd: 'weird',
+  acheive: 'achieve', tommorow: 'tomorrow', tommorrow: 'tomorrow', tomorow: 'tomorrow', accross: 'across',
+  probaly: 'probably', realy: 'really', finaly: 'finally', basicly: 'basically', begining: 'beginning', comming: 'coming',
+  completly: 'completely', enviroment: 'environment', existance: 'existence', foward: 'forward', goverment: 'government',
+  happend: 'happened', immediatly: 'immediately', independant: 'independent', neccessary: 'necessary', noticable: 'noticeable',
+  occassion: 'occasion', persistant: 'persistent', posession: 'possession', prefered: 'preferred', recomend: 'recommend',
+  refered: 'referred', relevent: 'relevant', succesful: 'successful', suprise: 'surprise', truely: 'truly', writting: 'writing'
+}
+
+/** A few shorthands with only one meaning in a trading journal. "u", "ur", "rn" and the like stay as typed. */
+export const SHORTHAND: Readonly<Record<string, string>> = {
+  bc: 'because', 'b/c': 'because', 'w/': 'with', 'w/o': 'without', tmrw: 'tomorrow', tmr: 'tomorrow', tmrow: 'tomorrow', b4: 'before'
+}
+
+/** Every fixed rewrite, by lower-case spelling. */
+export const WORD_FIXES: ReadonlyMap<string, string> = new Map(Object.entries({ ...SLIPS, ...SHORTHAND, ...CONTRACTIONS }))
+
+/**
+ * Words the English list leaves out: names of days, months, places and people a trader writes
+ * about, the contractions, and a few modern words. Written as they should appear, so
+ * "monday" is corrected to "Monday", while "Monday" and "MONDAY" are fine as they are.
+ */
+export const ENGLISH_EXTRAS: readonly string[] = [
+  'I', "I'm", "I've", "I'll", "I'd",
+  "don't", "doesn't", "didn't", "can't", "won't", "isn't", "aren't", "wasn't", "weren't", "couldn't", "shouldn't", "wouldn't",
+  "haven't", "hasn't", "hadn't", "mustn't", "needn't", "ain't", "you're", "you've", "you'll", "you'd", "they're", "they've",
+  "they'll", "they'd", "we're", "we've", "we'll", "we'd", "he's", "he'll", "he'd", "she's", "she'll", "she'd", "it's", "it'll",
+  "it'd", "that's", "that'll", "that'd", "there's", "there'll", "here's", "what's", "what'll", "where's", "who's", "who'll",
+  "who'd", "how's", "let's", "would've", "could've", "should've", "might've", "must've", "y'all", "o'clock", "ma'am",
+  'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Mondays', 'Tuesdays', 'Wednesdays',
+  'Thursdays', 'Fridays', 'Saturdays', 'Sundays', 'Mon', 'Tue', 'Tues', 'Wed', 'Thu', 'Thur', 'Thurs', 'Fri', 'Sat', 'Sun',
+  'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December',
+  'Jan', 'Feb', 'Mar', 'Apr', 'Jun', 'Jul', 'Aug', 'Sep', 'Sept', 'Oct', 'Nov', 'Dec',
+  'Christmas', 'Easter', 'Thanksgiving', 'Halloween',
+  'America', 'American', 'Americans', 'Europe', 'European', 'Tokyo', 'Sydney', 'Chicago', 'England', 'English', 'Britain',
+  'British', 'Japan', 'Japanese', 'China', 'Chinese', 'Germany', 'German', 'Canada', 'Australia', 'York', 'US', 'USA',
+  'UK', 'EU', 'Fed', 'Powell', 'Yellen', 'TradingView', 'Tradovate', 'NinjaTrader', 'Topstep', 'Discord', 'YouTube',
+  'Twitter', 'Google', 'Windows', 'Chrome', 'Excel', 'Dow', 'Jones', 'Russell', 'Bitcoin', 'Ethereum', 'God',
+  'timeframe', 'timeframes', 'offline', 'app', 'pre', 'un', 'co'
+]
+
+/** "the the" -> "the". Only words that are never doubled on purpose ("had had", "that that" are fine English). */
+export const NEVER_DOUBLED: ReadonlySet<string> = new Set(['the', 'a', 'an', 'to', 'of', 'in', 'on', 'at', 'and', 'for', 'with', 'is', 'was', 'my', 'i'])
+
+/**
+ * "to early" -> "too early". Only words that cannot follow "to" as a verb ("to close", "to
+ * slow down" and "to high" are left alone).
+ */
+export const TOO_WORDS: ReadonlySet<string> = new Set(['early', 'late', 'soon', 'fast', 'quick', 'quickly', 'much', 'big', 'tight', 'wide', 'risky', 'greedy', 'aggressive', 'aggressively', 'impatient', 'eager', 'small', 'many', 'far'])
+
+/**
+ * "to many" is "too many" only after words like these ("I took to many trades"); otherwise
+ * it is left alone ("this applies to many traders"). The same goes for "far", "small" and "big".
+ */
+export const TOO_AFTER: ReadonlySet<string> = new Set([
+  'was', 'were', 'is', 'are', 'am', 'be', 'been', 'being', 'way', 'took', 'take', 'taking', 'takes', 'made', 'make', 'had', 'have',
+  'has', 'got', 'get', 'entered', 're-entered', 'reentered', 'exited', 'sold', 'bought', 'went', 'risked', 'sized', 'moved', 'left',
+  'closed', 'cut', 'jumped', 'chased', 'pulled', 'came', 'in', 'out', 'traded', 'size', 'risk', 'stop', "it's", 'its', 'far'
+])
+/** Of the TOO_WORDS, the ones that need a word from TOO_AFTER before "to" (or a full stop after them). */
+export const TOO_NEEDS_CONTEXT: ReadonlySet<string> = new Set(['many', 'far', 'small', 'big'])
+
+/** Words that end a sentence-like chunk without ending a sentence: "e.g. this", "vs. that". */
+export const ABBREVIATIONS: ReadonlySet<string> = new Set(['e.g', 'i.e', 'eg', 'ie', 'vs', 'approx', 'mr', 'mrs', 'ms', 'dr', 'st', 'cf', 'etc'])

@@ -1,0 +1,129 @@
+/* Spelling underlines, the Organize button and its highlight, and the Spelling settings. Loaded after app.css and uses its design tokens. */
+
+/* ------------------------------------------------------------------ underlines */
+
+/* A soft wavy line in the theme's own warning colour: visible, never shouting. */
+:root {
+  --spell-line: color-mix(in srgb, var(--danger) 82%, transparent);
+}
+[data-theme='paper'] {
+  --spell-line: color-mix(in srgb, var(--danger) 72%, transparent);
+}
+
+.spell-miss {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--spell-line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  text-decoration-skip-ink: none;
+}
+
+/*
+ * A one-line field (title, quick note, caption) cannot draw underlines inside itself: a
+ * transparent copy of its text lies exactly over it (SpellInput.tsx sets its box and font from
+ * the field), showing only the wavy lines.
+ */
+.spell-field {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.spell-mirror {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  margin: 0;
+  border-color: transparent;
+  background: none;
+  color: transparent;
+  white-space: pre;
+  pointer-events: none;
+  user-select: none;
+}
+.spell-mirror-text {
+  white-space: pre;
+}
+.quick-note-field {
+  display: flex;
+  flex: 1;
+}
+.quick-note-field .quick-note-input {
+  width: 100%;
+}
+
+/* ------------------------------------------------------------------ Organize */
+
+/* The wand gives a small flourish when pressed: a tilt and a spring back. */
+.organize-button.is-flourish > svg {
+  animation: wand-flourish 520ms cubic-bezier(0.3, 1.5, 0.45, 1);
+}
+@keyframes wand-flourish {
+  0% {
+    transform: rotate(0) scale(0.8);
+  }
+  35% {
+    transform: rotate(-18deg) scale(1.12);
+  }
+  100% {
+    transform: rotate(0) scale(1);
+  }
+}
+
+/* Words Organize changed glow briefly in the accent colour, then settle (under a second). */
+.organize-flash {
+  border-radius: 3px;
+  animation: organize-flash 900ms var(--ease) both;
+}
+@keyframes organize-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--accent) 38%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 38%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+[data-motion='reduce'] .organize-flash {
+  animation: none;
+}
+
+/* Suggestions at the top of the right-click menu read first, as in a native menu. */
+.menu-item.is-strong .menu-text {
+  font-weight: 650;
+}
+
+/* ------------------------------------------------------------------ settings */
+
+.word-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 6px;
+  padding: 0;
+  list-style: none;
+}
+.word-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+.word-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--ink-faint);
+}
+.word-chip button:hover {
+  color: var(--ink);
+  background: var(--line);
+}

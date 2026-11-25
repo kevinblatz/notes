@@ -24,7 +24,8 @@ import {
   Strikethrough,
   Underline,
   Undo2,
-  Unlink
+  Unlink,
+  WandSparkles
 } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { FONT_KEYS, FONT_LABELS, FONT_SIZES, fontVar, HIGHLIGHT_COLORS, highlightVar, INK_COLORS, inkVar, safeLinkHref } from '@shared/content'
@@ -35,6 +36,7 @@ import { useStore } from '../../state/store'
 import { IconButton, MenuList, Popover, type MenuEntry } from '../ui'
 import { DrawingSpace } from './DrawingSpace'
 import { closeDrawing, openDrawing, useDrawingSession } from './drawingSession'
+import { ORGANIZE_SHORTCUT } from './organizeAction'
 
 /** Opens the drawing space for the caret, from anywhere in an open note, bar shown or hidden. */
 export const DRAW_SHORTCUT = 'Ctrl+Shift+D'
@@ -201,12 +203,13 @@ function ColorControl({ editor, kind, current }: { editor: Editor; kind: 'ink' |
   )
 }
 
-export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: () => void }) {
+export function FormatBar({ editor, onAddImage, onOrganize }: { editor: Editor; onAddImage: () => void; onOrganize: () => void }) {
   const state = useFormatState(editor)
   const [linkOpen, setLinkOpen] = useState(false)
   const linkAnchor = useRef<HTMLButtonElement>(null)
   const collapsed = useStore((s) => s.prefs.formatBarCollapsed)
   const drawing = useDrawingSession((s) => s.target)
+  const [flourish, setFlourish] = useState(false)
   const barId = useId()
 
   // Ctrl+Shift+D works wherever the keyboard is in the note (text, title, a caption), and
@@ -261,6 +264,21 @@ export function FormatBar({ editor, onAddImage }: { editor: Editor; onAddImage: 
               <Dropdown label="Text size" text={state.fontSize ? state.fontSize.replace('px', '') : 'Size'} entries={sizeEntries} width={56} />
               <IconButton label="Draw" hint={DRAW_SHORTCUT} aria-keyshortcuts="Control+Shift+D" onMouseDown={keepSelection} onClick={() => openDrawing({ kind: 'new' })}>
                 <Brush size={16} />
+              </IconButton>
+              {/* Fixes words and punctuation, and regroups thoughts that strayed. Ctrl+Shift+O also works with the bar folded away. */}
+              <IconButton
+                label="Organize"
+                hint={ORGANIZE_SHORTCUT}
+                className={`organize-button${flourish ? ' is-flourish' : ''}`}
+                aria-keyshortcuts="Control+Shift+O"
+                onMouseDown={keepSelection}
+                onAnimationEnd={() => setFlourish(false)}
+                onClick={() => {
+                  setFlourish(true)
+                  onOrganize()
+                }}
+              >
+                <WandSparkles size={16} />
               </IconButton>
             </div>
             <div className="bar-group">

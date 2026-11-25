@@ -132,7 +132,7 @@ export function Popover({ anchor, open, onClose, placement = 'bottom', align = '
 }
 
 export type MenuEntry =
-  | { kind?: 'item'; label: string; icon?: ReactNode; hint?: string; danger?: boolean; disabled?: boolean; checked?: boolean; onSelect: () => void }
+  | { kind?: 'item'; label: string; icon?: ReactNode; hint?: string; danger?: boolean; disabled?: boolean; checked?: boolean; strong?: boolean; onSelect: () => void }
   | { kind: 'separator' }
   | { kind: 'label'; label: string }
 
@@ -167,7 +167,7 @@ export function MenuList({ entries, onDone, keepFocus }: { entries: MenuEntry[];
             type="button"
             role={entry.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
             aria-checked={entry.checked}
-            className={`menu-item${entry.danger ? ' is-danger' : ''}`}
+            className={`menu-item${entry.danger ? ' is-danger' : ''}${entry.strong ? ' is-strong' : ''}`}
             disabled={entry.disabled}
             onMouseDown={keepFocus ? (event) => event.preventDefault() : undefined}
             onClick={() => {

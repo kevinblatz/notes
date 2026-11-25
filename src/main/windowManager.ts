@@ -188,7 +188,10 @@ export class WindowManager {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
-        spellcheck: true,
+        // The app has its own spelling checker (src/shared/spelling.ts), which knows trading
+        // terms. Chromium's is off everywhere, so it never underlines FVG or NWOG and never
+        // downloads dictionaries: the app makes no network requests.
+        spellcheck: false,
         devTools: this.options.allowDevTools
       }
     })
