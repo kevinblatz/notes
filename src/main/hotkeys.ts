@@ -88,11 +88,12 @@ export class HotkeyController {
     this.typing = null
     const { windows } = this.options
     let done: HandBack = session.handBack
+    // hide() and minimize() hand the keyboard back first themselves (see WindowManager).
     if (session.handBack === 'hide') windows.hide()
     else if (session.handBack === 'minimize') windows.minimize()
     // Only while the notes still have the keyboard: if the user already took it elsewhere
     // themselves (clicked the chart while the strip was open), it stays where they put it.
-    else if (session.handBack === 'blur') done = windows.giveKeyboardBack() === 'blur' ? 'blur' : 'none'
+    else if (session.handBack === 'blur') done = windows.releaseKeyboard() === 'none' ? 'none' : 'blur'
     this.record.lastHandBack = done
   }
 

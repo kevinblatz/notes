@@ -2,7 +2,7 @@
  * Main process entry point: wires the note library, the window, the tray icon, the global
  * shortcut and the IPC bridge together, and owns startup and shutdown.
  */
-import { writeFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, desktopCapturer, dialog, nativeImage, powerMonitor, screen, session } from 'electron'
 import { bindingsFromPreferences, HOTKEY_IDS, type HotkeyId } from '@shared/hotkeys'
@@ -13,6 +13,7 @@ import trayPng from '../../resources/tray.png?asset'
 import { applyAutostart, AUTOSTART_ARG, readAutostart } from './autostart'
 import { CandleClock } from './candleClock'
 import { HotkeyController } from './hotkeys'
+import { foregroundStatus } from './foreground'
 import { registerIpc } from './ipc'
 import { handleAttachmentRequests, registerAttachmentScheme } from './protocol'
 import { ShortcutManager } from './shortcut'
@@ -167,6 +168,18 @@ async function main(): Promise<void> {
     tray?.refresh()
   }
 
+  // Optional start-up report and keyboard event log, used by scripts/windows-native-check.ps1
+  // to confirm on real Windows what the packaged app did.
+  const diagnosticsFile = process.env.TRADING_NOTES_DIAGNOSTICS
+  const keyboardLog = (how: string): void => {
+    if (!diagnosticsFile) return
+    try {
+      appendFileSync(`${diagnosticsFile}.keyboard.log`, `${JSON.stringify({ at: Date.now(), how })}\n`)
+    } catch {
+      // Diagnostics are best effort.
+    }
+  }
+
   const manager = new WindowManager({
     library: lib,
     preloadPath: join(__dirname, '../preload/index.js'),
@@ -175,9 +188,12 @@ async function main(): Promise<void> {
     iconPath: appIcon,
     getPreferences: () => lib.getPreferences(),
     onStatusChange,
+    onKeyboardReleased: keyboardLog,
     allowDevTools: !app.isPackaged || isTest
   })
   windows = manager
+  // Load user32 now rather than at the first hotkey, which must act at once.
+  const keyboardReturn = foregroundStatus()
 
   const applyPreferences = (previous: Preferences, next: Preferences): void => {
     if (previous.alwaysOnTop !== next.alwaysOnTop) manager.setAlwaysOnTop(next.alwaysOnTop)
@@ -300,9 +316,6 @@ async function main(): Promise<void> {
     tray = null
   }
 
-  // Optional start-up report, used by scripts/windows-native-check.ps1 to confirm that the
-  // packaged app really created its tray icon and registered its shortcut.
-  const diagnosticsFile = process.env.TRADING_NOTES_DIAGNOSTICS
   if (diagnosticsFile) {
     try {
       writeFileSync(
@@ -314,6 +327,7 @@ async function main(): Promise<void> {
           tray: tray ? tray.state() : { created: false, iconLoaded: false },
           shortcut: shortcuts.status(),
           hotkeys: shortcuts.statuses(),
+          keyboardReturn,
           alwaysOnTop: win.isAlwaysOnTop(),
           bounds: win.getBounds(),
           dataDir: lib.dataDir

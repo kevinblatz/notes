@@ -54,6 +54,9 @@ ask for them with the shortcut.
 | **Ctrl + Shift + Space** (from any app) | Show or hide the notes. Change it in Settings. |
 | Click the tray icon | Show or hide the notes. Right-click for a quick note, a chart snapshot, dock side, always-on-top, opacity and Quit. |
 | Close button, or Alt + F4 | Hide to the tray. Your notes are saved first. |
+
+Hiding the notes (any of these ways) gives the keyboard back to the app you came from, so you
+can keep typing in Chrome without clicking it first.
 | Gear, then **Quit Trading Notes** | Actually exit. |
 | **Ctrl + ,** | Open Settings: hotkeys, dock side, always on top, opacity, start with Windows, candle chime, risk calculator defaults, theme, font and size. |
 
@@ -252,7 +255,7 @@ Every push builds the app on a real Windows machine and runs three things there
 | --- | --- |
 | Unit tests | Layout rules (no note is ever lost or overwritten), storage, stale-save rejection, Trash, backup round trip and import validation, search, window placement on made-up monitor arrangements. |
 | Desktop tests | The real app driven through the acceptance checks: writing and autosave, screenshots by paste, drop and file picker, formatting surviving a restart, rearranging, narrow and wide layouts, pins, search, Trash, backup and import, docking, hide and show, drafts surviving hide, quit and a crash, a failed save, an unavailable shortcut, a window left off screen, and performance with 300 notes and 80 screenshots. |
-| Native window check | `scripts/windows-native-check.ps1`, with real mouse and keyboard input against a real Chrome window: the notes are always-on-top and stay put; every click on Chrome gives Chrome the keyboard; the notes never take focus back; typing lands in Chrome; the notes stay above a maximized and a fullscreen Chrome; the global shortcut hides and shows the one window; a second launch does not open a second window; Alt+F4 hides to the tray; the tray icon exists. |
+| Native window check | `scripts/windows-native-check.ps1`, with real mouse and keyboard input against a real Chrome window: the notes are always-on-top and stay put; every click on Chrome gives Chrome the keyboard; the notes never take focus back; typing lands in Chrome; the notes stay above a maximized and a fullscreen Chrome; the global shortcut hides and shows the one window, and hiding gives the keyboard back to Chrome; a second launch does not open a second window; Alt+F4 hides to the tray and gives Chrome the keyboard; the tray icon exists; the trading hotkeys with real key presses (quick note and risk calculator give the keyboard back to Chrome, also from hidden notes; snapshot and see-through never take it; what was typed is in today's log). |
 
 Not verified by automation, so worth a look on your own machine:
 
@@ -307,8 +310,11 @@ Layout of the source:
 | `tests/unit/`, `tests/e2e/` | Unit tests and desktop tests. |
 
 The stack is Electron, React, TypeScript, Tiptap (free extensions only), dnd-kit and SQLite.
-Every dependency is bundled at build time, so the packaged app contains no `node_modules` and
-no native module that needs compiling.
+Every dependency is bundled at build time except one: [koffi](https://koffi.dev/), which lets
+the app ask Windows which window has the keyboard and give it back to that window (Electron
+cannot do either). It is shipped as its prebuilt Windows module, so nothing needs compiling.
+If it ever fails to load, the notes still let go of the keyboard in a way that hands it to the
+app below them.
 
 **Growing into a trading journal.** A note has a `kind` (only `note` today) and a free-form
 `extra` field, and the database has a schema version with a migration list

@@ -29,9 +29,17 @@ import {
   type Rect,
   type SavedWindowState
 } from '@shared/windowBounds'
+import { foregroundApi, handleFromBuffer, previousWindowFromActivate, WM_ACTIVATE, type WindowHandle } from './foreground'
 import type { Library } from './store/library'
 
 export type ShowMode = 'focus' | 'inactive' | 'hidden'
+
+/**
+ * How the notes gave the keyboard back: to the window noted when they took it ('returned', or
+ * 'returned-activate' when it was noted from WM_ACTIVATE), by letting go below the
+ * always-on-top band ('blur-below', Windows), or by letting go ('blur'). 'none': they did not have it.
+ */
+export type KeyboardRelease = 'returned' | 'returned-activate' | 'blur-below' | 'blur' | 'none'
 export type FlushOutcome = 'saved' | 'failed' | 'timeout' | 'unavailable'
 
 export interface WindowManagerOptions {
@@ -43,6 +51,8 @@ export interface WindowManagerOptions {
   iconPath: string
   getPreferences: () => Preferences
   onStatusChange: () => void
+  /** The notes gave the keyboard back (for the start-up diagnostics' event log). */
+  onKeyboardReleased?: (how: KeyboardRelease) => void
   allowDevTools: boolean
 }
 
@@ -118,6 +128,13 @@ export class WindowManager {
   /** The pointer state opacity follows: becomes false only POINTER_LEAVE_MS after the pointer left. */
   private pointerInside = false
   private hasKeyboard = false
+  /**
+   * Windows: the window that had the keyboard when the notes took it, to give it back to
+   * (see foreground.ts). Forgotten as soon as the notes lose the keyboard.
+   */
+  private returnTo: { hwnd: WindowHandle; noted: 'foreground' | 'activate' } | null = null
+  /** What the last hand-back of the keyboard did, for the tests and the diagnostics. */
+  readonly keyboardRecord = { last: null as KeyboardRelease | null, count: 0 }
   private opacityPreview: number | null = null
   private requestedOpacity = 1
   private appliedOpacity = 1
@@ -183,6 +200,20 @@ export class WindowManager {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     win.webContents.on('will-navigate', (event) => event.preventDefault())
     win.webContents.on('will-attach-webview', (event) => event.preventDefault())
+
+    // Whoever had the keyboard before the notes were activated is the one to give it back to.
+    if (process.platform === 'win32') {
+      const own = handleFromBuffer(win.getNativeWindowHandle())
+      win.hookWindowMessage(WM_ACTIVATE, (wParam, lParam) => {
+        const previous = previousWindowFromActivate(wParam, lParam, own)
+        // A window noted just before a hotkey or the shortcut took the keyboard is kept.
+        if (previous !== null && this.returnTo === null) this.returnTo = { hwnd: previous, noted: 'activate' }
+      })
+    }
+    // Once the keyboard has gone elsewhere, the window that had it before is no longer the one to go back to.
+    win.on('blur', () => {
+      this.returnTo = null
+    })
 
     // Closing the window hides it to the tray; only an explicit Quit ends the app.
     win.on('close', (event) => {
@@ -425,6 +456,8 @@ export class WindowManager {
     if (win.isMinimized()) win.restore()
     if (!isUsablyVisible(win.getNormalBounds(), this.displays())) this.reconcileDisplays()
     if (focus) {
+      // The window that has the keyboard now gets it back when the notes are done with it.
+      this.noteForegroundWindow(win)
       // Asked for in order to type in them: the notes appear as they will be once they have
       // the keyboard, rather than see-through for a moment first.
       this.hasKeyboard = true
@@ -434,6 +467,7 @@ export class WindowManager {
       // Windows can refuse to hand over the keyboard. Then there will be no focus or blur
       // event to correct the guess, so correct it here.
       if (process.platform === 'win32' && !win.isFocused()) {
+        this.returnTo = null
         this.hasKeyboard = false
         this.updateOpacity()
       }
@@ -450,6 +484,9 @@ export class WindowManager {
     // Ask the window to write any pending edit. The renderer keeps running while hidden, so
     // this is belt and braces rather than the only thing standing between typing and disk.
     void this.requestFlush(1500)
+    // On Windows a hidden window keeps the keyboard (Chromium hides without activating another
+    // window), so typing would go into notes that cannot be seen. Hand it back first.
+    if (process.platform === 'win32') this.releaseKeyboard()
     win.hide()
     this.options.onStatusChange()
   }
@@ -465,6 +502,8 @@ export class WindowManager {
   }
 
   minimize(): void {
+    // The keyboard goes to the window that had it before, rather than wherever Windows picks.
+    if (process.platform === 'win32') this.releaseKeyboard()
     this.window?.minimize()
   }
 
@@ -473,17 +512,46 @@ export class WindowManager {
   }
 
   /**
-   * Give the keyboard back to the app that had it before a hotkey asked to type in the notes
-   * (the chart, usually), leaving the notes where they are and visible. On Windows, blur()
-   * activates the next visible window in z-order, which is the window that was active before.
-   * Kept to this one function so the method can be swapped if Windows hands the keyboard to
-   * the taskbar instead: `win.minimize(); win.showInactive()` gives it to the previous app.
+   * Give the keyboard back to the app that had it before the notes took it (the chart,
+   * usually), leaving the notes where they are. Does nothing unless the notes have it.
+   *
+   * - On Windows, the window noted when the notes took the keyboard is activated directly.
+   * - Otherwise (nothing noted, that window has gone or is minimized, or user32 could not be
+   *   loaded) the notes let go with blur(), which on Windows activates the next visible window
+   *   below them. An always-on-top window steps out of the always-on-top band for that moment,
+   *   so that the next window is the app used last rather than the taskbar.
    */
-  giveKeyboardBack(): 'blur' | 'none' {
+  releaseKeyboard(): KeyboardRelease {
     const win = this.window
     if (!win || !win.isVisible() || !win.isFocused()) return 'none'
-    win.blur()
-    return 'blur'
+    const target = this.returnTo
+    this.returnTo = null
+    let how: KeyboardRelease = 'blur'
+    const api = foregroundApi()
+    if (api && target && api.usable(target.hwnd) && api.activate(target.hwnd)) {
+      how = target.noted === 'foreground' ? 'returned' : 'returned-activate'
+    } else if (process.platform === 'win32' && win.isAlwaysOnTop()) {
+      win.setAlwaysOnTop(false)
+      win.blur()
+      win.setAlwaysOnTop(true)
+      how = 'blur-below'
+    } else {
+      win.blur()
+    }
+    this.keyboardRecord.last = how
+    this.keyboardRecord.count++
+    this.options.onKeyboardReleased?.(how)
+    return how
+  }
+
+  /** Windows: note the window in front now, as the one to give the keyboard back to. */
+  private noteForegroundWindow(win: BrowserWindow): void {
+    if (win.isFocused()) return
+    const api = foregroundApi()
+    if (!api) return
+    const current = api.current()
+    const own = handleFromBuffer(win.getNativeWindowHandle())
+    if (current !== 0 && current !== own) this.returnTo = { hwnd: current, noted: 'foreground' }
   }
 
   /** The notes window when it is visible and docked to a half of a display (snapshots cut it away). */

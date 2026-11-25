@@ -306,6 +306,7 @@ $chromeProfile = Join-Path ([System.IO.Path]::GetTempPath()) ("tn-chrome-" + [gu
 $env:TRADING_NOTES_DATA_DIR = $dataDir
 $diagnostics = Join-Path (Resolve-Path $OutDir).Path "app-diagnostics.json"
 $env:TRADING_NOTES_DIAGNOSTICS = $diagnostics
+Remove-Item $diagnostics, "$diagnostics.keyboard.log" -ErrorAction SilentlyContinue
 $work = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 Say "Screen $($screen.Width)x$($screen.Height), work area $($work.X),$($work.Y) $($work.Width)x$($work.Height)"
@@ -350,6 +351,10 @@ try {
       Check "Trading hotkeys registered with Windows" ($missing.Count -eq 0) ($missing -join "; ")
     }
     if ($report.PSObject.Properties["dataDir"] -and $report.dataDir) { $dbFile = Join-Path $report.dataDir "notes.db" }
+    # user32 through koffi, a native module shipped in the package: without it the notes can only
+    # let go of the keyboard, not give it to the exact window that had it.
+    $keyboardReturn = if ($report.PSObject.Properties["keyboardReturn"]) { $report.keyboardReturn } else { $null }
+    Check "App can give the keyboard back to the exact window that had it (user32 through koffi)" ($keyboardReturn -and [bool]$keyboardReturn.available) ($(if ($keyboardReturn -and $keyboardReturn.error) { $keyboardReturn.error } elseif (-not $keyboardReturn) { "not reported" } else { "" }))
   }
 
   $rect = RectOf $notes
@@ -453,6 +458,16 @@ try {
   Check "Still always-on-top after hide and show" (IsTopmost $notes)
   Check "Exactly one notes window exists" ((FindWindows "^Trading Notes$" $appName).Count -eq 1)
   Shot "08-shown-again"
+  # Hidden while they have the keyboard, the notes give it back (a hidden window must never
+  # keep it: typing would go into notes that cannot be seen).
+  Chord $Shortcut
+  $hiddenAgain = WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000
+  $chartAgain = WaitFor { if ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) { $true } } 3000
+  $fg = [Native]::GetForegroundWindow()
+  Check "Hiding the notes with the shortcut gives the keyboard back to the chart" ([bool]$hiddenAgain -and [bool]$chartAgain) ("foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
+  Chord $Shortcut
+  Check "The shortcut shows the notes again" ([bool](WaitFor { if ([Native]::IsWindowVisible($notes)) { $true } } 4000))
+  Start-Sleep -Milliseconds 600
 
   # ---------------------------------------------------------------- tray icon
   # Informational: finding another app's tray icon depends on the Windows version and on
@@ -477,9 +492,9 @@ try {
   if (-not [Native]::IsWindowVisible($notes)) { Chord $Shortcut; Start-Sleep -Milliseconds 800 }
 
   # ---------------------------------------------------------------- trading hotkeys
-  # The notes take the keyboard only while a typing hotkey is open, then give it back. If the
-  # hand-back check fails with the taskbar in the foreground, WindowManager.giveKeyboardBack()
-  # is the one function to change (minimize() + showInactive() instead of blur()).
+  # The notes take the keyboard only while a typing hotkey is open, then give it back to the
+  # window that had it (WindowManager.releaseKeyboard). The app's keyboard log, printed at the
+  # end, says how each hand-back was done.
   # Each quick note carries a word of its own, so the notes database can be searched for it.
   $firstProbe = DbProbe
   $dbReadable = $null -ne $firstProbe
@@ -548,6 +563,11 @@ try {
 
   # Snapshot: captured without the notes ever taking the keyboard, and stored like a pasted
   # screenshot: one more attachment in the database, and an image in today's log.
+  # Checked on its own: if a hand-back above failed, the chart is given the keyboard again first.
+  if ((ProcessNameOf ([Native]::GetForegroundWindow())) -ne $browserName) {
+    Say "  (the chart did not have the keyboard before the snapshot; clicking it so the snapshot is checked on its own)"
+    Click $chartPoint[0] $chartPoint[1]
+  }
   $snapBefore = if ($dbReadable) { DbProbe } else { $null }
   $stolen = $false
   Chord "ctrl+alt+s"
@@ -569,6 +589,10 @@ try {
   Check "The chart still has the keyboard once the snapshot is stored" ((ProcessNameOf $fg) -eq $browserName) ("foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
   # See-through on and off again, also without taking the keyboard. Reported only, as the
   # alpha is read from Windows' layered-window state, which Electron owns.
+  if ((ProcessNameOf ([Native]::GetForegroundWindow())) -ne $browserName) {
+    Say "  (the chart did not have the keyboard before see-through; clicking it so see-through is checked on its own)"
+    Click $chartPoint[0] $chartPoint[1]
+  }
   $alphaBefore = AlphaOf $notes
   Chord "ctrl+alt+o"
   $wentSeeThrough = WaitFor { if ((AlphaOf $notes) -lt 255) { $true } } 3000
@@ -596,10 +620,25 @@ try {
   Chord "alt+f4"
   $hiddenByClose = WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000
   Check "Alt+F4 hides the window" ([bool]$hiddenByClose)
+  # The notes were clicked into, not brought forward by a hotkey: the window they note is the one
+  # Windows names as deactivated (or, failing that, the one below the always-on-top band).
+  $closedBack = WaitFor { if ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) { $true } } 3000
+  $fg = [Native]::GetForegroundWindow()
+  Check "Closing the notes gives the keyboard back to the chart" ([bool]$closedBack) ("foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
   Check "The app keeps running in the tray after the window is closed" (@(Get-Process -Name $appName -ErrorAction SilentlyContinue).Count -gt 0)
   Chord $Shortcut
   Check "The shortcut brings it back after closing" ([bool](WaitFor { if ([Native]::IsWindowVisible($notes)) { $true } } 4000))
   Shot "09-final"
+  # How each hand-back of the keyboard was done, as the app recorded it: 'returned' (to the
+  # window noted when a hotkey or the shortcut took the keyboard), 'returned-activate' (noted
+  # from Windows' activation message), 'blur-below' (let go below the always-on-top band).
+  $keyboardLog = "$diagnostics.keyboard.log"
+  if (Test-Path $keyboardLog) {
+    $hows = @(Get-Content $keyboardLog | ForEach-Object { try { ($_ | ConvertFrom-Json).how } catch { "?" } })
+    Say ("  keyboard hand-backs recorded by the app: " + ($hows -join ", "))
+  } else {
+    Say "  (the app recorded no keyboard hand-backs)"
+  }
 }
 catch {
   Say "ERROR: $_"

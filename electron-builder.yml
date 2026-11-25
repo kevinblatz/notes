@@ -10,12 +10,20 @@ files:
   - "!out/**/*.map"
   - resources/**/*
   - package.json
+  # koffi is the one runtime dependency shipped in node_modules (see electron.vite.config.mts).
+  # Its C++ sources, headers and documentation are not needed to run it.
+  - "!**/node_modules/koffi/src/**/*.{cc,hh,h,asm,S,def,txt}"
+  - "!**/node_modules/koffi/{vendor,lib,doc}/**"
+  - "!**/node_modules/koffi/{cnoke.cjs,CHANGELOG.md,README.md}"
+  - "!**/node_modules/@koromix/*/*.{lib,md}"
 asar: true
-# The tray and window icons are read by Windows from a real file path.
 asarUnpack:
+  # The tray and window icons are read by Windows from a real file path.
   - resources/**
-# Everything the app needs is bundled into out/, so no node_modules are shipped and there is
-# nothing native to rebuild (SQLite is built into Electron).
+  # A native module is loaded by Windows from a real file path.
+  - "**/node_modules/@koromix/**/*.node"
+# Everything else the app needs is bundled into out/. Nothing native is rebuilt: SQLite is built
+# into Electron and koffi ships a prebuilt Node-API module.
 npmRebuild: false
 # Hardening: the packaged executable cannot be turned into a general-purpose Node runtime or
 # be attached to with a debugger from the command line, and it only loads its own code.

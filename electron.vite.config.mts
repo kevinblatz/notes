@@ -29,12 +29,14 @@ const contentSecurityPolicy = (): Plugin => ({
   transformIndexHtml: (html) => html.replace('<meta charset="UTF-8" />', `<meta charset="UTF-8" />\n    <meta http-equiv="Content-Security-Policy" content="${CSP}" />`)
 })
 
-// Every runtime dependency is bundled, so the packaged app ships no node_modules and needs
-// no native rebuild (SQLite comes from Electron's built-in node:sqlite).
+// Every runtime dependency is bundled, except koffi (user32 access on Windows, see
+// src/main/foreground.ts): its prebuilt native module is shipped in node_modules and loaded at
+// run time. Nothing needs a native rebuild (SQLite comes from Electron's built-in node:sqlite,
+// and koffi uses Node-API, which does not depend on the Electron version).
 export default defineConfig({
   main: {
     resolve: { alias: shared },
-    build: { externalizeDeps: false, minify: true }
+    build: { externalizeDeps: false, minify: true, rollupOptions: { external: ['koffi'] } }
   },
   preload: {
     resolve: { alias: shared },
