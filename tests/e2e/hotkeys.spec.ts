@@ -171,6 +171,25 @@ test('quick note while the chart has the keyboard: it is given back to the chart
   await expect.poll(async () => (await notesWindow(app)).focused).toBe(false)
   expect((await notesWindow(app)).visible).toBe(true)
   expect(await logLines(app)).toEqual(['09:31:05 — London high taken'])
+
+  // Opened while the notes had the keyboard, then the chart was clicked with the strip still
+  // open: the next press finds the keyboard with the chart, so that is where it goes back.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.getTitle() === 'Trading Notes')!.focus())
+  await expect.poll(async () => (await notesWindow(app)).focused).toBe(true)
+  await pressAt(app, 'quickNote', at(25, 9, 40, 0))
+  await expect(stripInput(page)).toBeFocused()
+  await page.keyboard.type('Asia low')
+  await app.evaluate(() => ((globalThis as Record<string, unknown>).__probe as { other: { focus: () => void } }).other.focus())
+  await expect.poll(async () => (await notesWindow(app)).focused).toBe(false)
+  await pressAt(app, 'quickNote', at(25, 9, 41, 0))
+  await expect(stripInput(page)).toBeFocused()
+  await expect(stripInput(page)).toHaveValue('Asia low')
+  await page.keyboard.type(' holds')
+  await page.keyboard.press('Enter')
+  await expect(strip(page)).toBeHidden()
+  await expect.poll(async () => (await notesWindow(app)).focused).toBe(false)
+  expect(await handBack(app)).toBe('blur')
+  expect(await logLines(app)).toEqual(['09:31:05 — London high taken', '09:41:00 — Asia low holds'])
   // One notes window throughout (plus the stand-in for the chart).
   expect(await windowCount(app)).toBe(2)
 })
@@ -284,6 +303,86 @@ test('a quick note goes in through the editor when the log itself is open, keepi
   await page.keyboard.press('Control+Enter')
   await expect(focusView(page)).toBeHidden()
   expect(await logLines(app)).toEqual(['11:00:00 — one', 'typing here!', '11:02:00 — two'])
+})
+
+test('the strip keeps its keys over a drawing and stays in sight over the image preview', async () => {
+  const { app, page } = await start()
+  await clickEmptySpace(page)
+  await page.keyboard.type('a note with a drawing')
+  await page.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Draw' }).click()
+  const space = page.getByTestId('drawing-space')
+  const eraser = page.getByRole('toolbar', { name: 'Drawing tools' }).getByRole('button', { name: 'Eraser', exact: true })
+  await expect(space).toBeVisible()
+  await expect(eraser).toHaveAttribute('aria-pressed', 'false')
+
+  // The drawing's own keys (E for the eraser, 1-3 for the size, Tab kept in the sheet) are
+  // not taken from the strip on top of it.
+  await pressAt(app, 'quickNote', at(25, 13, 0, 0))
+  await expect(stripInput(page)).toBeFocused()
+  await page.keyboard.type('e1 entry 3 here')
+  await page.keyboard.press('Tab')
+  await expect(stripInput(page)).toBeFocused()
+  await expect(stripInput(page)).toHaveValue('e1 entry 3 here')
+  await expect(eraser).toHaveAttribute('aria-pressed', 'false')
+  await page.keyboard.press('Enter')
+  await expect(strip(page)).toBeHidden()
+  await expect(space).toBeVisible()
+  expect(await logLines(app)).toEqual(['13:00:00 — e1 entry 3 here'])
+  // The sheet has its keys back.
+  await page.keyboard.press('e')
+  await expect(eraser).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('Escape')
+  await expect(space).toBeHidden()
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+
+  // The image preview covers the whole window: the strip goes over it, and Esc closes the
+  // strip first, the preview after.
+  await app.evaluate(
+    (_electron, png) => {
+      ;(globalThis as unknown as { __tnTest: Handle }).__tnTest.testHooks.desktopSources = [{ id: 'window:42:0', name: 'ES1! 6,123.25 ▲ +0.35% Unnamed - Google Chrome', png }]
+    },
+    makePng(800, 450, [40, 160, 150]).toString('base64')
+  )
+  await pressAt(app, 'snapshot', at(25, 13, 5, 0))
+  const card = page.locator('.board > .note').filter({ hasText: '13:00:00 — e1 entry 3 here' })
+  await expect(card.locator('img')).toBeVisible()
+  await card.locator('.note-image-button').first().click()
+  const preview = page.getByTestId('image-preview')
+  await expect(preview).toBeVisible()
+  await pressAt(app, 'quickNote', at(25, 13, 6, 0))
+  await expect(stripInput(page)).toBeFocused()
+  const onTop = await page.evaluate(() => {
+    const box = document.querySelector('.quick-note-input')!.getBoundingClientRect()
+    return document.elementFromPoint(box.x + 30, box.y + box.height / 2)?.classList.contains('quick-note-input') ?? false
+  })
+  expect(onTop).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(strip(page)).toBeHidden()
+  await expect(preview).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(preview).toBeHidden()
+})
+
+test('hidden while the strip is open: the next press brings the strip back with what was typed', async () => {
+  const { app, page } = await start()
+  await pressAt(app, 'quickNote', at(25, 15, 0, 0))
+  await expect(stripInput(page)).toBeFocused()
+  await page.keyboard.type('half a thought')
+  // The show/hide shortcut hides the notes: that typing session is over.
+  await press(app, 'toggle')
+  await expect.poll(async () => (await notesWindow(app)).visible).toBe(false)
+  await pressAt(app, 'quickNote', at(25, 15, 1, 0))
+  await expect(stripInput(page)).toBeFocused()
+  await expect(stripInput(page)).toHaveValue('half a thought')
+  await expect(strip(page)).toContainText('15:01:00')
+  await page.keyboard.type(', finished')
+  await page.keyboard.press('Enter')
+  await expect(strip(page)).toBeHidden()
+  // The new press found the notes hidden, so they hide again.
+  await expect.poll(async () => (await notesWindow(app)).visible).toBe(false)
+  expect(await handBack(app)).toBe('hide')
+  expect(await logLines(app)).toEqual(['15:01:00 — half a thought, finished'])
 })
 
 test('snapshot: the chart window goes into today’s log as a managed image, without taking the keyboard', async () => {
@@ -455,6 +554,73 @@ test('risk calculator from the chart: Enter copies and the keyboard goes back to
   expect(await handBack(app)).toBe('blur')
 })
 
+test('risk calculator: Tab stays in the panel, edge amounts, and Settings never undoes what it remembered', async () => {
+  const { app, page } = await start()
+  await clickEmptySpace(page)
+  await page.keyboard.type('note underneath')
+  await press(app, 'risk')
+  const panel = page.getByTestId('risk-panel')
+  await expect(panel.getByTestId('risk-dollars')).toBeFocused()
+  // Round and round the panel's own fields, both ways: never into the note underneath.
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press('Tab')
+    expect(await page.evaluate(() => document.activeElement?.closest('[data-testid="risk-panel"]') != null), `Tab ${i + 1}`).toBe(true)
+  }
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press('Shift+Tab')
+    expect(await page.evaluate(() => document.activeElement?.closest('[data-testid="risk-panel"]') != null), `Shift+Tab ${i + 1}`).toBe(true)
+  }
+  await expect(editorBody(page)).toHaveText('note underneath')
+
+  const contracts = panel.getByTestId('risk-contracts')
+  const risk = panel.getByTestId('risk-dollars')
+  const stopField = panel.getByTestId('risk-stop')
+  for (const bad of ['-5', '0', '1e3', 'abc', '0.001']) {
+    await risk.fill(bad)
+    await stopField.fill('4')
+    await expect(contracts, bad).toHaveText('–')
+    await expect(panel.getByTestId('risk-result'), bad).toContainText('Enter the dollars you are willing to lose')
+  }
+  // A stop under one tick counts as one tick (and says "1 tick").
+  await risk.fill('0.01')
+  await stopField.fill('0.0001')
+  await expect(contracts).toHaveText('0 contracts')
+  await expect(panel.getByTestId('risk-result')).toContainText('0.25 pts (1 tick)')
+  // A huge risk on the smallest stop: millions of contracts, shown grouped and copied whole.
+  await risk.fill('5,000,000')
+  await stopField.fill('0.25')
+  await expect(contracts).toHaveText('4,000,000 contracts')
+  await stopField.press('Enter')
+  await expect(panel).toBeHidden()
+  expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe('4000000')
+  await expect(page.locator('.toast').filter({ hasText: '4,000,000 contracts copied' })).toBeVisible()
+  await expect(editorBody(page)).toBeFocused()
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+
+  // Settings shows the remembered risk, follows the calculator while it is open, and does not
+  // write its own older value back when the field loses the keyboard.
+  await openHotkeySettings(page)
+  const field = page.getByTestId('settings-risk')
+  await expect(field).toHaveValue('5000000')
+  await field.fill('250')
+  await field.press('Enter')
+  await expect.poll(async () => (await prefs(app)).riskCents).toBe(25000)
+  await field.focus()
+  await press(app, 'risk')
+  await expect(risk).toHaveValue('250')
+  await risk.fill('300')
+  await stopField.fill('2')
+  await expect(contracts).toHaveText('30 contracts')
+  await page.keyboard.press('Enter')
+  await expect(panel).toBeHidden()
+  await expect(field).toBeFocused()
+  await expect(field).toHaveValue('300')
+  await page.getByTestId('settings').getByRole('heading', { name: 'Hotkeys' }).click()
+  await expect(field).not.toBeFocused()
+  await expect.poll(async () => (await prefs(app)).riskCents).toBe(30000)
+})
+
 test('candle timer: the chip counts down to the close, and the main process announces each close', async () => {
   const { app, page } = await start()
   const chip = page.getByTestId('candle-chip')
@@ -618,6 +784,26 @@ test('Settings: every hotkey can be rebound; a taken combination is reported and
   await expect(page.getByTestId('settings')).toBeVisible()
   await expect.poll(() => registered(app, 'Control+Shift+Space')).toBe(true)
   expect(await registered(app, 'Control+Alt+Q')).toBe(true)
+  expect(await registered(app, 'Control+Alt+R')).toBe(true)
+
+  // However the recording ends, the hotkeys come back: moving to another row, Settings closed
+  // with its button while still listening, or the notes hidden while listening.
+  await page.getByTestId('hotkey-button-risk').click()
+  await expect.poll(() => registered(app, 'Control+Shift+Space')).toBe(false)
+  await page.getByTestId('hotkey-button-openLog').click()
+  await expect(page.getByTestId('hotkey-button-openLog')).toHaveText('Press keys…')
+  await expect(page.getByTestId('hotkey-button-risk')).toHaveText('Ctrl + Alt + R')
+  await page.waitForTimeout(200)
+  expect(await registered(app, 'Control+Shift+Space')).toBe(false)
+  await settings.getByRole('button', { name: 'Close' }).click()
+  await expect(settings).toBeHidden()
+  await expect.poll(() => registered(app, 'Control+Shift+Space')).toBe(true)
+  expect(await registered(app, 'Control+Alt+L')).toBe(true)
+  await openHotkeySettings(page)
+  await page.getByTestId('hotkey-button-risk').click()
+  await expect.poll(() => registered(app, 'Control+Shift+Space')).toBe(false)
+  await app.evaluate(() => (globalThis as unknown as { __tnTest: Handle }).__tnTest.windows.hide())
+  await expect.poll(() => registered(app, 'Control+Shift+Space')).toBe(true)
   expect(await registered(app, 'Control+Alt+R')).toBe(true)
   await stop(ctx)
 

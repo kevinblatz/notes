@@ -10,6 +10,7 @@ import { isValidAccelerator } from '@shared/accelerator'
 import { isOpenableExternalUrl } from '@shared/content'
 import { bindingsFromPreferences, HOTKEY_IDS, preferencesFromBindings } from '@shared/hotkeys'
 import { IPC } from '@shared/ipc'
+import { MAX_CONTRACTS } from '@shared/risk'
 import type {
   AppInfo,
   ExportResult,
@@ -68,7 +69,7 @@ const zHotkeyId = z.enum(HOTKEY_IDS)
 const zSetHotkey = z.object({ id: zHotkeyId, accelerator: z.string().max(64) })
 const zSetHotkeyEnabled = z.object({ id: zHotkeyId, enabled: z.boolean() })
 const zMoment = z.number().int().nonnegative().max(8.64e15)
-const zContracts = z.number().int().nonnegative().max(1_000_000)
+const zContracts = z.number().int().nonnegative().max(MAX_CONTRACTS)
 const zToken = z.number().int().positive()
 
 function toBytes(value: ArrayBuffer | ArrayBufferView): Uint8Array {

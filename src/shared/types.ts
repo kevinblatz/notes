@@ -327,7 +327,7 @@ export interface MainEvents {
 
 export type HotkeyEvent =
   /** Typing hotkeys: the window has the keyboard until it calls endTyping(token). */
-  | { action: 'quickNote' | 'risk'; token: number; at: number; hadKeyboard: boolean }
+  | { action: 'quickNote' | 'risk'; token: number; at: number }
   | { action: 'openLog'; at: number }
   | { action: 'seeThrough'; opacity: number }
 

@@ -16,6 +16,11 @@
   background: color-mix(in srgb, var(--ground) 62%, transparent);
   animation: fade-in 110ms linear;
 }
+/* The image preview covers the whole window (120, title bar included): the panel the
+   keyboard is in must still be seen, so it goes over the preview while that is open. */
+.preview-layer ~ .capture-layer {
+  z-index: 125;
+}
 .capture-card {
   width: min(1080px, 100%);
   background: var(--raised);
@@ -56,6 +61,17 @@
 }
 
 /* ------------------------------------------------------------------ quick note */
+
+/* A strip across the whole window, flush under the title bar: nothing of the note's own
+   header (Back, Log note) peeks out around it. */
+.capture-layer:has(.quick-note) {
+  padding: 0 0 12px;
+}
+.capture-card:has(.quick-note) {
+  width: 100%;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
 
 .quick-note {
   display: flex;

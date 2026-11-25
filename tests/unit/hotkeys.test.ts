@@ -7,8 +7,12 @@ import {
   distanceFromPrices,
   dollarsInputText,
   evaluateRisk,
+  formatContracts,
   formatDollars,
   formatPoints,
+  formatTicks,
+  MAX_CONTRACTS,
+  MAX_RISK_CENTS,
   parseDecimal,
   parseDollars,
   positionSize,
@@ -119,6 +123,23 @@ describe('risk calculator arithmetic', () => {
     expect(formatDollars(12345600)).toBe('$123,456')
     expect(dollarsInputText(25000)).toBe('250')
     expect(dollarsInputText(18705)).toBe('187.05')
+  })
+
+  it('counts contracts and ticks in words, grouped', () => {
+    expect(formatContracts(0)).toBe('0 contracts')
+    expect(formatContracts(1)).toBe('1 contract')
+    expect(formatContracts(4_000_000)).toBe('4,000,000 contracts')
+    expect(formatTicks(1)).toBe('1 tick')
+    expect(formatTicks(13)).toBe('13 ticks')
+  })
+
+  it('never gives more contracts than can be copied: the largest risk on the smallest stop', () => {
+    // MNQ's tick is the smallest (50 cents): $100,000,000 at one tick.
+    expect(MAX_CONTRACTS).toBe(MAX_RISK_CENTS / 50)
+    const largest = evaluateRisk({ instrument: 'MNQ', risk: '100000000', stop: '1', unit: 'ticks' })
+    expect(largest).toMatchObject({ kind: 'ok', contracts: MAX_CONTRACTS })
+    expect(Number.isSafeInteger(MAX_CONTRACTS)).toBe(true)
+    expect(evaluateRisk({ instrument: 'MNQ', risk: '100000000.01', stop: '1', unit: 'ticks' })).toMatchObject({ kind: 'invalid', field: 'risk' })
   })
 })
 

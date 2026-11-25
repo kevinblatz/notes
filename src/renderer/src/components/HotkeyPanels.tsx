@@ -11,8 +11,10 @@ import {
   distanceFromPrices,
   dollarsInputText,
   evaluateRisk,
+  formatContracts,
   formatDollars,
   formatPoints,
+  formatTicks,
   INSTRUMENT_KEYS,
   INSTRUMENTS,
   parseDollars,
@@ -31,11 +33,40 @@ import { Segmented } from './ui'
 export function HotkeyPanels() {
   const capture = useStore((s) => s.capture)
   if (!capture) return null
-  return capture.kind === 'quickNote' ? <QuickNoteStrip key={capture.token} capture={capture} /> : <RiskPanel key={capture.token} capture={capture} />
+  // Kept (with what is typed in it) when a later press takes the panel over in a new session.
+  return capture.kind === 'quickNote' ? <QuickNoteStrip key="quickNote" capture={capture} /> : <RiskPanel key="risk" capture={capture} />
+}
+
+/**
+ * Tab and Shift+Tab go round the panel's own fields and buttons, wherever the keyboard is
+ * (also after a title bar button was clicked): they never reach a note or a sheet underneath,
+ * where the next keys typed would land.
+ */
+function useTabInside(card: React.RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Tab' || event.ctrlKey || event.altKey || event.metaKey || !card.current) return
+      const items = Array.from(card.current.querySelectorAll<HTMLElement>('input:not([disabled]), button:not([disabled])')).filter(
+        (item) => item.tabIndex >= 0 && item.offsetParent !== null
+      )
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (!first || !last) return
+      const index = items.indexOf(document.activeElement as HTMLElement)
+      const wrapTo = index === -1 ? (event.shiftKey ? last : first) : event.shiftKey && index === 0 ? last : !event.shiftKey && index === items.length - 1 ? first : null
+      if (!wrapTo) return
+      event.preventDefault()
+      wrapTo.focus({ preventScroll: true })
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [card])
 }
 
 /** Clicking beside the panel closes it, unless that would throw away typing. */
 function Layer({ children, onOutside, label }: { children: React.ReactNode; onOutside: () => void; label: string }) {
+  const card = useRef<HTMLDivElement>(null)
+  useTabInside(card)
   return (
     <div
       className="capture-layer"
@@ -46,7 +77,7 @@ function Layer({ children, onOutside, label }: { children: React.ReactNode; onOu
         onOutside()
       }}
     >
-      <div className="capture-card" role="dialog" aria-label={label}>
+      <div ref={card} className="capture-card" role="dialog" aria-modal="true" aria-label={label}>
         {children}
       </div>
     </div>
@@ -184,7 +215,7 @@ function RiskPanel({ capture }: { capture: CaptureState }) {
     else setHint(outcome.kind === 'ok' ? 'Nothing to copy: the stop is too wide for this risk.' : 'Enter a risk and a stop first.')
   }
 
-  const contractsLabel = outcome.kind === 'ok' ? `${outcome.contracts} ${outcome.contracts === 1 ? 'contract' : 'contracts'}` : '–'
+  const contractsLabel = outcome.kind === 'ok' ? formatContracts(outcome.contracts) : '–'
   const point = INSTRUMENTS[instrument].pointValueCents
 
   return (
@@ -311,7 +342,7 @@ function RiskPanel({ capture }: { capture: CaptureState }) {
               <span>{outcome.needs === 'risk' ? 'Type the dollars you are willing to lose.' : 'Type the stop distance, or an entry and a stop price.'}</span>
             )}
           </div>
-          {outcome.kind === 'ok' && outcome.roundedUp ? <div className="risk-note">Stop rounded up to whole ticks: {formatPoints(outcome.ticks)} pts ({outcome.ticks} ticks).</div> : null}
+          {outcome.kind === 'ok' && outcome.roundedUp ? <div className="risk-note">Stop rounded up to whole ticks: {formatPoints(outcome.ticks)} pts ({formatTicks(outcome.ticks)}).</div> : null}
         </div>
 
         <div className="risk-foot">

@@ -33,6 +33,8 @@ export function tickValueCents(instrument: InstrumentKey): number {
 /** Largest amounts the calculator accepts; anything bigger is a typing slip. */
 export const MAX_RISK_CENTS = 100_000_000 * 100
 const MAX_SCALED = 1e14
+/** The most contracts the arithmetic can ever give: the largest risk at one tick of the smallest tick value. */
+export const MAX_CONTRACTS = Math.floor(MAX_RISK_CENTS / Math.min(...INSTRUMENT_KEYS.map(tickValueCents)))
 
 /**
  * Read a number as a person types it ("1,250", "4.5", "4,5", "$300", "6 123.25") as an
@@ -123,6 +125,18 @@ export function positionSize(instrument: InstrumentKey, riskCents: number, stopT
   const perContractCents = stopTicks * tickValueCents(instrument)
   const contracts = perContractCents > 0 && riskCents > 0 ? Math.floor(riskCents / perContractCents) : 0
   return { contracts, perContractCents, actualRiskCents: contracts * perContractCents }
+}
+
+const COUNT = new Intl.NumberFormat('en-US')
+
+/** "1 contract", "11 contracts", "4,000,000 contracts". */
+export function formatContracts(contracts: number): string {
+  return `${COUNT.format(contracts)} ${contracts === 1 ? 'contract' : 'contracts'}`
+}
+
+/** "1 tick", "13 ticks". */
+export function formatTicks(ticks: number): string {
+  return `${COUNT.format(ticks)} ${ticks === 1 ? 'tick' : 'ticks'}`
 }
 
 /** Whole ticks as points: 18 -> "4.5", 1 -> "0.25". */

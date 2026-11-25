@@ -458,6 +458,9 @@ export function DrawingSpace({ editor, target }: { editor: Editor; target: Drawi
     }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.isComposing || event.key === 'Escape') return
+      // The quick note strip or the risk calculator is open on top: its keys are its own
+      // (typing "e" or "1" there must not switch the pen, nor Tab jump into the sheet).
+      if (useStore.getState().capture) return
       const mod = event.ctrlKey || event.metaKey
       const key = event.key.toLowerCase()
       const stop = (): void => {

@@ -27,10 +27,8 @@ function HotkeyRow({ id, recording, onRecord }: { id: HotkeyId; recording: boole
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'warning' } | null>(null)
   const info = HOTKEY_INFO[id]
 
-  const stop = (): void => {
-    onRecord(null)
-    void api.suspendShortcut(false)
-  }
+  // Ending the recording takes the hotkeys back (in the recording effect's cleanup).
+  const stop = (): void => onRecord(null)
   useEscape(recording, stop)
 
   // A layout effect, so the key listener is in place in the same frame the button changes:
@@ -50,22 +48,35 @@ function HotkeyRow({ id, recording, onRecord }: { id: HotkeyId; recording: boole
         return
       }
       onRecord(null)
-      void api.setHotkey(id, captured.accelerator).then(async ({ status: next, accepted, takenFrom, statuses }) => {
+      void api.setHotkey(id, captured.accelerator).then(({ status: next, accepted, takenFrom, statuses }) => {
         if (accepted) {
           adoptStatuses(statuses)
           if (id === 'toggle') setState({ shortcutNoticeDismissed: false })
           const taken = takenFrom.length > 0 ? ` It was set for ${joinLabels(takenFrom)}, which is now off.` : ''
           setMessage({ text: `${formatAccelerator(next.accelerator)} now ${info.does}.${taken}`, kind: 'info' })
         } else {
-          // Keep whatever was working before and say why the new one was refused.
-          await api.suspendShortcut(false)
+          // Whatever was working before is kept; say why the new one was refused.
           setMessage({ text: `${next.error ?? 'That shortcut is not available.'} Choose a different combination.`, kind: 'warning' })
         }
       })
     }
+    // Another app took the keyboard: nothing more can be recorded here, and the hotkeys must
+    // work again for the app the user went to.
+    const onBlur = (): void => {
+      onRecord(null)
+    }
     window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [recording, id, info.does])
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('blur', onBlur)
+      // However recording ends (a key, Esc, another row, Settings closed by its button or
+      // by a click outside, the window hidden), the hotkeys are taken back. Never left
+      // released: then not even show/hide would work any more. When another row starts
+      // recording, its own effect releases them again straight after.
+      void api.suspendShortcut(false)
+    }
+  }, [recording, id, info.does, onRecord])
 
   const toggle = (enabled: boolean): void => {
     setMessage(null)
@@ -131,12 +142,16 @@ export function HotkeySettings() {
 /** The candle chime and the risk calculator's starting values. */
 export function TradingSettings() {
   const prefs = useStore((s) => s.prefs)
-  const [risk, setRisk] = useState(prefs.riskCents ? dollarsInputText(prefs.riskCents) : '')
+  // What is being typed, until it is stored; otherwise the field shows the stored amount, so
+  // a change made in the calculator meanwhile (it can open over Settings) is never undone.
+  const [draft, setDraft] = useState<string | null>(null)
+  const risk = draft ?? (prefs.riskCents ? dollarsInputText(prefs.riskCents) : '')
   const saveRisk = (): void => {
-    const cents = parseDollars(risk)
+    if (draft === null) return
+    const cents = parseDollars(draft)
     const next = cents && cents > 0 ? cents : null
     if (next !== prefs.riskCents) void updatePreferences({ riskCents: next })
-    setRisk(next ? dollarsInputText(next) : '')
+    setDraft(null)
   }
   return (
     <>
@@ -171,7 +186,7 @@ export function TradingSettings() {
             aria-label="Dollar risk"
             placeholder="200"
             value={risk}
-            onChange={(event) => setRisk(event.target.value)}
+            onChange={(event) => setDraft(event.target.value)}
             onBlur={saveRisk}
             onKeyDown={(event) => {
               if (event.key === 'Enter') saveRisk()

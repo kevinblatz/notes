@@ -248,7 +248,12 @@ async function main(): Promise<void> {
   const startMode: ShowMode = process.argv.includes('--hidden') ? 'hidden' : process.argv.includes(AUTOSTART_ARG) ? 'inactive' : 'focus'
   const win = manager.create(startMode)
   win.webContents.on('did-start-loading', () => hotkeys.pageReset())
-  win.on('hide', () => hotkeys.windowHidden())
+  win.on('hide', () => {
+    hotkeys.windowHidden()
+    // A shortcut being recorded in Settings has every hotkey released; hidden, the window
+    // cannot record anything, and show/hide must work to bring it back.
+    shortcuts.suspend(false)
+  })
 
   // Windows is logging off or shutting down: there is no time to ask anything. Have the window
   // write what is pending, and record a clean exit unless the window last reported writing

@@ -23,7 +23,6 @@ interface TypingSession {
   token: number
   action: TypingAction
   handBack: HandBack
-  hadKeyboard: boolean
 }
 
 export interface HotkeyControllerOptions {
@@ -64,20 +63,22 @@ export class HotkeyController {
     const { windows } = this.options
     const win = windows.window
     if (!win) return
-    if (this.typing) {
+    const visible = win.isVisible()
+    const minimized = win.isMinimized()
+    const focused = visible && !minimized && win.isFocused()
+    if (this.typing && focused) {
       // Pressed again (or the other typing hotkey) while typing: same session, same way back.
       this.typing.action = action
     } else {
-      const visible = win.isVisible()
-      const minimized = win.isMinimized()
-      const focused = visible && !minimized && win.isFocused()
+      // A first press; or a press after the keyboard went elsewhere while the panel stayed
+      // open (the chart was clicked): then where the keyboard is now is where it goes back to.
       const handBack: HandBack = !visible ? 'hide' : minimized ? 'minimize' : focused ? 'none' : 'blur'
-      this.typing = { token: ++this.tokens, action, handBack, hadKeyboard: focused }
+      this.typing = { token: this.typing?.token ?? ++this.tokens, action, handBack }
     }
-    const { token, hadKeyboard } = this.typing
+    const { token } = this.typing
     // Told before it gets the keyboard, so the strip is ready for the very first key typed.
-    windows.send('hotkey', { action, token, at: this.options.now(), hadKeyboard })
-    if (!win.isFocused() || !windows.isShown()) windows.show(true)
+    windows.send('hotkey', { action, token, at: this.options.now() })
+    if (!focused) windows.show(true)
   }
 
   /** The window finished typing (Enter or Esc): give the keyboard back to where it was. */

@@ -5,6 +5,7 @@
  */
 import { flushSync } from 'react-dom'
 import { formatOpacity } from '@shared/preferences'
+import { formatContracts } from '@shared/risk'
 import { cleanQuickNote, logImage, logParagraph, quickNoteLine } from '@shared/sessionLog'
 import type { HotkeyEvent, SnapshotEvent } from '@shared/types'
 import { api } from '../lib/api'
@@ -20,14 +21,16 @@ let returnFocusTo: Element | null = null
 export function handleHotkey(event: HotkeyEvent): void {
   if (event.action === 'quickNote' || event.action === 'risk') {
     const current = getState().capture
-    const sameSession = current?.token === event.token
-    if (!sameSession) {
+    // Only when nothing is open yet: where the keyboard was before it. A panel still open
+    // from an earlier press (the notes were hidden meanwhile, which ended that session) is
+    // taken over by the new session, with what was typed in it.
+    if (!current) {
       returnFocusTo = document.activeElement
       if (returnFocusTo instanceof HTMLElement && returnFocusTo.closest('.ProseMirror')) currentEditor()?.captureSelection()
     }
     // Drawn and focused right now, not on the next frame: keys typed straight after the
     // hotkey must land in the strip, never in a note open underneath.
-    flushSync(() => setState({ capture: { kind: event.action, token: event.token, at: event.at, presses: sameSession ? current.presses + 1 : 1 } }))
+    flushSync(() => setState({ capture: { kind: event.action, token: event.token, at: event.at, presses: current ? current.presses + 1 : 1 } }))
   } else if (event.action === 'openLog') {
     // The main process has already ended any typing session: the keyboard stays here now.
     returnFocusTo = null
@@ -85,9 +88,15 @@ export async function submitQuickNote(text: string): Promise<boolean> {
 
 /** Enter in the risk calculator: the contract count onto the clipboard, and close. */
 export async function copyContractsAndClose(contracts: number): Promise<void> {
-  await api.copyContracts(contracts)
+  try {
+    await api.copyContracts(contracts)
+  } catch (error) {
+    // The panel stays open with its numbers; nothing is on the clipboard.
+    toast(`The count could not be copied. ${cleanMessage(error)}`, { kind: 'error', duration: 9000 })
+    return
+  }
   endCapture()
-  const message = `${contracts} ${contracts === 1 ? 'contract' : 'contracts'} copied`
+  const message = `${formatContracts(contracts)} copied`
   toast(message, { duration: 2500 })
   announce(`${message}.`)
 }
