@@ -592,6 +592,32 @@ test('find: empty query lists pinned and recent notes; titles, text, captions an
   expect(await storedLayout(app)).toEqual(layout)
 })
 
+test('find: typing faster than the window can catch up never loses a character', async () => {
+  const { page } = ctx
+  await writeNote(page, ['Opening range: fade the first push after ten.'])
+  await page.keyboard.press('Control+k')
+  await expect(findInput(page)).toBeFocused()
+  // Sixty keystrokes in one go, with no pause between them for the page to catch up: each one
+  // must be taken in on its own. (A highlight reset done in an effect queued a second render
+  // per keystroke; after about fifty React stopped with error #185 and dropped a character.)
+  const typed = 'opening range fade the first push after ten and then a little'.slice(0, 60)
+  const value = await findInput(page).evaluate((input, text) => {
+    const element = input as HTMLInputElement
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    for (const character of text) {
+      setValue.call(element, element.value + character)
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    return element.value
+  }, typed)
+  expect(value).toBe(typed)
+  await expect(findInput(page)).toHaveValue(typed)
+  await expect(palette(page).locator('.palette-empty')).toBeVisible()
+  // Back to a query that matches: the highlight is on the first result.
+  await typeQuery(page, 'fade')
+  await expect(palette(page).locator('.result').first()).toHaveAttribute('aria-selected', 'true')
+})
+
 test('find: arrows and Enter reveal, Ctrl+Enter opens, Esc leaves the board exactly as it was', async () => {
   const { page, app } = ctx
   await seedTall(page, NATO)

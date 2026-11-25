@@ -183,7 +183,15 @@ export function FindPalette({ mode }: { mode: 'find' | 'pins' }) {
   }, [searching, all, query, tag, pins, notes])
 
   const flat = sections.flatMap((section) => section.results)
-  useEffect(() => setActive(0), [query, tag, mode])
+  // The highlight goes back to the first result in the same update as the change it follows,
+  // never in an effect: an effect here queued a second, low-priority render after every
+  // keystroke, and fast typing on a busy machine piled those up until React took it for an
+  // endless loop and dropped a typed character (React error #185).
+  const [shownMode, setShownMode] = useState(mode)
+  if (shownMode !== mode) {
+    setShownMode(mode)
+    setActive(0)
+  }
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === 'ArrowDown') {
@@ -239,14 +247,26 @@ export function FindPalette({ mode }: { mode: 'find' | 'pins' }) {
                 aria-controls="find-results"
                 aria-activedescendant={flat[active] ? `find-option-${active}` : undefined}
                 spellCheck={false}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setActive(0)
+                }}
                 onKeyDown={onKeyDown}
               />
             </label>
             {tags.length > 0 ? (
               <div className="palette-tags" aria-label="Filter by tag">
                 {tags.slice(0, 10).map((name) => (
-                  <button key={name} type="button" className={`tag-filter${tag === name ? ' is-selected' : ''}`} aria-pressed={tag === name} onClick={() => setTag(tag === name ? null : name)}>
+                  <button
+                    key={name}
+                    type="button"
+                    className={`tag-filter${tag === name ? ' is-selected' : ''}`}
+                    aria-pressed={tag === name}
+                    onClick={() => {
+                      setTag(tag === name ? null : name)
+                      setActive(0)
+                    }}
+                  >
                     {name}
                   </button>
                 ))}
