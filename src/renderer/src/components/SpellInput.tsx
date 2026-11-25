@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
   type ChangeEventHandler,
+  type ClipboardEventHandler,
   type FocusEventHandler,
   type ForwardedRef,
   type InputHTMLAttributes,
@@ -297,8 +298,13 @@ const LINE_BREAKS = /\r\n|\r|\n/g
  * A field for a single line of text that wraps onto as many lines as it needs, growing with its
  * text (no scroll bar, nothing cut off). It never holds a line break: Enter and Shift+Enter are
  * left to the owner's onKeyDown, and pasted or dropped line breaks become spaces.
+ *
+ * React does not hold the textarea's text (no `value` prop): a controlled textarea also gets its
+ * default text (its child text node) rewritten on every change, and that ends Chromium's run of
+ * typing, so Ctrl+Z would take back one letter at a time instead of what was typed. The text is
+ * put in from `value` whenever the two differ (a note opened, Organize, a suggestion picked).
  */
-export const SpellTextArea = forwardRef<HTMLTextAreaElement, SpellTextAreaProps>(function SpellTextArea({ value, fieldClassName, onChange, onBlur, onSelect, onKeyUp, onScroll, ...rest }, forwarded) {
+export const SpellTextArea = forwardRef<HTMLTextAreaElement, SpellTextAreaProps>(function SpellTextArea({ value, fieldClassName, onChange, onBlur, onSelect, onKeyUp, onScroll, onPaste, ...rest }, forwarded) {
   const oneLine: ChangeEventHandler<HTMLTextAreaElement> = (event) => {
     const field = event.target
     if (/[\r\n]/.test(field.value)) {
@@ -309,6 +315,10 @@ export const SpellTextArea = forwardRef<HTMLTextAreaElement, SpellTextAreaProps>
     onChange?.(event)
   }
   const spell = useSpellField<HTMLTextAreaElement>(value, forwarded, { onChange: oneLine, onBlur, onSelect, onKeyUp, onScroll }, true)
+  useLayoutEffect(() => {
+    const field = spell.input.current
+    if (field && field.value !== value) field.value = value
+  }, [spell.input, value])
   // A line break is never typed in, whatever key or input method asks for one.
   useEffect(() => {
     const field = spell.input.current
@@ -319,9 +329,22 @@ export const SpellTextArea = forwardRef<HTMLTextAreaElement, SpellTextAreaProps>
     field.addEventListener('beforeinput', refuse)
     return () => field.removeEventListener('beforeinput', refuse)
   }, [spell.input])
+  // Pasted lines are joined with spaces as they go in, so Ctrl+Z takes the paste back, as one
+  // step of its own (putting the selection back where it is ends the run of typing around it).
+  const pasteOnOneLine: ClipboardEventHandler<HTMLTextAreaElement> = (event) => {
+    onPaste?.(event)
+    const text = event.clipboardData.getData('text/plain')
+    if (event.defaultPrevented || !/[\r\n]/.test(text)) return
+    event.preventDefault()
+    const field = event.currentTarget
+    const endTyping = (): void => field.setSelectionRange(field.selectionStart, field.selectionEnd, field.selectionDirection)
+    endTyping()
+    document.execCommand('insertText', false, text.replace(LINE_BREAKS, ' '))
+    endTyping()
+  }
   return (
     <span className={`spell-field is-wrapping${fieldClassName ? ` ${fieldClassName}` : ''}`}>
-      <textarea ref={spell.setRef} value={value} rows={1} {...rest} {...spell.fieldProps} />
+      <textarea ref={spell.setRef} rows={1} {...rest} {...spell.fieldProps} onPaste={pasteOnOneLine} />
       {spell.overlay}
     </span>
   )

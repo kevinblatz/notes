@@ -131,6 +131,8 @@ export function ImageNodeView({ node, updateAttributes, selected, editor, getPos
           if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) return
           // Keep typing keys in the caption field instead of handing them to the editor.
           event.stopPropagation()
+          // Enter that picks a word in an input method (Japanese, Chinese ...) stays in the caption.
+          if (event.nativeEvent.isComposing) return
           if (event.key === 'Enter') {
             event.preventDefault()
             event.currentTarget.blur()

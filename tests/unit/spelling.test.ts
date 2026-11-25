@@ -330,6 +330,13 @@ describe('trader words', () => {
     expect(corrected('price may march on. we sat in the sun. the sun may rise. we may 2 more contracts. march 20 was the low')).toBe(
       'price may march on. we sat in the sun. the sun may rise. we may 2 more contracts. march 20 was the low'
     )
+    // "may" the verb after a word that often comes before a month, or after an ordinal.
+    expect(corrected('whatever trade im in may hit stop. the position im in may run. the 2nd may be the better entry, the 3rd may work too')).toBe(
+      "whatever trade I'm in may hit stop. the position I'm in may run. the 2nd may be the better entry, the 3rd may work too"
+    )
+    expect(corrected('in may i sized up. in may, i sized up. the setup in may 2025 was clean. since march we held. late may and june. early march rally')).toBe(
+      'in May I sized up. in May, I sized up. the setup in May 2025 was clean. since March we held. late May and June. early March rally'
+    )
   })
 })
 

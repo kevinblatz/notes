@@ -161,6 +161,14 @@ export const ITS_ADJECTIVE_FOLLOWERS: ReadonlySet<string> = new Set(['to', 'how'
 export const DATE_WORDS: Readonly<Record<string, string>> = { may: 'May', march: 'March', wed: 'Wed', sat: 'Sat', sun: 'Sun' }
 /** Before a month name that is also a word, these make it the month: "in may", "early march". */
 export const MONTH_AFTER: ReadonlySet<string> = new Set(['in', 'of', 'since', 'until', 'till', 'through', 'early', 'mid', 'late', 'during'])
+/**
+ * ... and "may" only when what follows could not follow "may" the verb: "in may I sized up",
+ * "since may the range held" (not "the trade I'm in may run", "the 2nd may be better").
+ */
+export const MONTH_FOLLOWERS: ReadonlySet<string> = new Set([
+  'i', 'we', 'he', 'she', 'they', 'it', "i'm", 'im', 'the', 'a', 'an', 'my', 'our', 'this', 'last', 'next', 'and', 'or', 'but', 'when', 'if',
+  'while', 'after', 'before', 'until', 'at', 'for', 'on', 'in', 'of', 'with', 'during', 'is', 'was', 'were', 'has', 'had'
+])
 export const MONTH_NAMES: ReadonlySet<string> = new Set([
   'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
   'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'

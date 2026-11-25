@@ -13,8 +13,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { installCursors } from './lib/cursors'
+import { installFieldUndo } from './lib/fieldUndo'
 
 installCursors()
+installFieldUndo()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

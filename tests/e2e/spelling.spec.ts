@@ -746,6 +746,96 @@ test('at 680 px the title and a caption wrap onto as many lines as they need: al
   expect(covered).toMatchObject({ overlaps: 0, cut: 0, inCard: true })
 })
 
+test('Ctrl+Z in the title or a caption takes back what was typed or pasted there, a run at a time, and never reaches into the note text', async () => {
+  const { page, app } = ctx
+  await newNote(page)
+  await page.keyboard.type('Body text here.')
+  await copyImageToClipboard(app, makePng(640, 300, [60, 110, 220]))
+  await page.keyboard.press('Control+v')
+  await expect(page.locator('.focus-editor .image-node img')).toBeVisible()
+  const noteText = async (): Promise<string[]> => outline(page)
+  expect(await noteText()).toEqual(['Body text here.', '[image]'])
+
+  // The title: typing, a paste of several lines (joined with spaces), more typing.
+  const title = page.locator('.focus-title')
+  await title.click()
+  await page.keyboard.type('Wednesday ')
+  await app.evaluate(({ clipboard }) => clipboard.writeText('one\ntwo'))
+  await page.keyboard.press('Control+v')
+  await page.keyboard.type(' four')
+  await expect(title).toHaveValue('Wednesday one two four')
+  const titleSteps: string[] = []
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('Control+z')
+    titleSteps.push(await title.inputValue())
+  }
+  expect(titleSteps).toEqual(['Wednesday one two', 'Wednesday ', '', '', '', ''])
+  await expect(title).toBeFocused()
+  // Pressed more often than there were edits in the title, Ctrl+Z left the note alone.
+  expect(await noteText()).toEqual(['Body text here.', '[image]'])
+  await page.keyboard.press('Control+y')
+  await expect(title).toHaveValue('Wednesday ')
+  await page.keyboard.press('Control+Shift+z')
+  await expect(title).toHaveValue('Wednesday one two')
+
+  // A caption, the same way.
+  await page.locator('.focus-editor .image-node img').click()
+  const caption = page.locator('.focus-editor .image-caption')
+  await caption.click()
+  await page.keyboard.type('NQ ')
+  await app.evaluate(({ clipboard }) => clipboard.writeText('a\r\nb'))
+  await page.keyboard.press('Control+v')
+  await page.keyboard.type(' c')
+  await expect(caption).toHaveValue('NQ a b c')
+  const captionSteps: string[] = []
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('Control+z')
+    captionSteps.push(await caption.inputValue())
+  }
+  expect(captionSteps).toEqual(['NQ a b', 'NQ ', '', '', '', ''])
+  await expect(caption).toBeFocused()
+  expect(await noteText()).toEqual(['Body text here.', '[image]'])
+  await expect(title).toHaveValue('Wednesday one two')
+
+  // In the note text, Ctrl+Z is still the note's own undo.
+  await editorBody(page).locator('p').first().click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' More.')
+  expect(await noteText()).toEqual(['Body text here. More.', '[image]'])
+  await page.keyboard.press('Control+z')
+  expect(await noteText()).toEqual(['Body text here.', '[image]'])
+})
+
+test('Enter that picks a word in an input method stays in the title or caption, and the word goes there', async () => {
+  const { page, app } = ctx
+  await newNote(page)
+  await page.keyboard.type('Body text here.')
+  await copyImageToClipboard(app, makePng(640, 300, [60, 110, 220]))
+  await page.keyboard.press('Control+v')
+  await expect(page.locator('.focus-editor .image-node img')).toBeVisible()
+  const ime = await page.context().newCDPSession(page)
+  const compose = async (): Promise<void> => {
+    await ime.send('Input.imeSetComposition', { text: 'にほん', selectionStart: 3, selectionEnd: 3 })
+    await page.keyboard.press('Enter')
+    await ime.send('Input.insertText', { text: '日本' })
+  }
+
+  const title = page.locator('.focus-title')
+  await title.click()
+  await compose()
+  await expect(title).toBeFocused()
+  await expect(title).toHaveValue('日本')
+
+  await page.locator('.focus-editor .image-node img').click()
+  const caption = page.locator('.focus-editor .image-caption')
+  await caption.click()
+  await compose()
+  await expect(caption).toBeFocused()
+  await expect(caption).toHaveValue('日本')
+  expect(await outline(page)).toEqual(['Body text here.', '[image]'])
+  await ime.detach()
+})
+
 /** A real note from the user, typed after a session ("umitigated" in italics), with the chart under it. */
 const REAL_ONE_BEFORE =
   'Missed dump to NWOG taking shit, got back and took 4-5 trades in the hour of 845-930. All scalps. 10 contracts a pull. Hit a few lost a few, im understanding the market a little more on the micros, its just the god candles fuck me sometimes. Also unmiitigated 5 min fvg kept edging that it was gonna go touch it but price kept moving upward tpwards nothingness, i knew price would wanna sweep and mitigate that 5 min fvg, so instead of waiting for it to do that and wait for an entry, my entry IS the way down to that 5 min fvg '

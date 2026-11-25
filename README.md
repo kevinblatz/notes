@@ -105,7 +105,7 @@ hotkey keeps the combination it had.
 | **Organize** (the wand beside Draw), or **Ctrl + Shift + O** | Fix the spelling, grammar and punctuation of the whole note, and put back together a thought that strayed off and came back. See *Organize and spelling* below. |
 | Right-click an underlined word | Pick one of up to four suggestions, or *Add to dictionary*. |
 | Click an image, drag its corner | Resize it (the proportions are kept). Type under it to add a caption. |
-| Type a long title or caption | It wraps onto as many lines as it needs, so all of it stays readable in a narrow window (on the board too). It is still one line of text: **Enter** in the title goes on to the note text (so does **↓** on the title's last line), **Enter** in a caption goes back to the note text, and a pasted line break becomes a space. |
+| Type a long title or caption | It wraps onto as many lines as it needs, so all of it stays readable in a narrow window (on the board too). It is still one line of text: **Enter** in the title goes on to the note text (so does **↓** on the title's last line), **Enter** in a caption goes back to the note text, and a pasted line break becomes a space. **Ctrl + Z** there takes back only what was typed or pasted there, never the note text. |
 | **Ctrl + click** a link while editing | Open it in your browser. On the board a plain click opens it. |
 | *Add tag*, under the note | Label the note (Rules, Setups and Journal are suggested; any word works). Find can filter by tag. |
 
@@ -151,7 +151,7 @@ thought wandered off and came back, put back together.
    displacement, imapatient → impatient, tommorow → tomorrow; dont → don't, im → I'm, thats →
    that's, a lone i → I; day and month names (friday → Friday, november → November; *may*,
    *march*, *wed*, *sat* and *sun* only as dates: "may 5th" → "May 5th", "in march" → "in
-   March"); trading terms in their usual form (fvg → FVG, ifvgs → IFVGs, nwog → NWOG,
+   March", never "the trade I'm in may run"); trading terms in their usual form (fvg → FVG, ifvgs → IFVGs, nwog → NWOG,
    choch → CHoCH, ce → CE, asia → Asia, +2r → +2R); a few shorthands (bc and b/c → because, w/ →
    with, w/o → without, tmrw → tomorrow, b4 → before). A short code that is also a word (am, es,
    ob, org, mt ...) is only written as a term in a sentence about the market: "ny am killzone"

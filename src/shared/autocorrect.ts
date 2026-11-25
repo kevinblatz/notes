@@ -32,6 +32,7 @@ import {
   MODAL_ADVERBS,
   MODALS,
   MONTH_AFTER,
+  MONTH_FOLLOWERS,
   MONTH_NAMES,
   NEVER_DOUBLED,
   TOO_AFTER,
@@ -128,8 +129,15 @@ export function correctText(text: string, speller: Speller, skip?: (from: number
     const dayAfter = /^ +(?:[1-9]|[12]\d|3[01])(?:(?:st|nd|rd|th)\b|(?=[.,;:!?)]|\s*$|\s*[–—-]|\s+(?:\d{4}|at|and|or|to|through|till|until)\b))/i.test(rest)
     const before = items[index - 1]
     const beforeText = before && before.token.sentence === word.token.sentence && /^ +$/.test(text.slice(before.token.to, word.token.from)) ? lower(before) : ''
-    // ... "in may", "early march", "the 5th of may", "3rd march"
-    if (said === 'may' || said === 'march') return dayAfter || MONTH_AFTER.has(beforeText) || /^(?:[1-9]|[12]\d|3[01])(?:st|nd|rd|th)$/.test(beforeText)
+    // ... "in may", "early march", "the 5th of may", "3rd march"; "may" only where no verb
+    // follows: "the trade I'm in may run" and "the 2nd may be better" keep the word.
+    if (said === 'may' || said === 'march') {
+      if (dayAfter) return true
+      if (!MONTH_AFTER.has(beforeText) && !/^(?:[1-9]|[12]\d|3[01])(?:st|nd|rd|th)$/.test(beforeText)) return false
+      if (said === 'march') return true
+      const after = nextWord(index)
+      return /^\s*(?:$|[.,;:!?)\n—–])|^ +(?:\d{4}|'\d{2})\b/.test(rest) || (!!after && MONTH_FOLLOWERS.has(lower(after)))
+    }
     // "sat 11/22", "wed nov 25"
     const next = items[index + 1]
     return /^ +\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(rest) || (!!next && next.token.kind === 'word' && /^ +$/.test(text.slice(word.token.to, next.token.from)) && MONTH_NAMES.has(next.token.text.toLowerCase()) && !DATE_WORDS[next.token.text.toLowerCase()])
