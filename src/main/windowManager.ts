@@ -468,6 +468,31 @@ export class WindowManager {
     this.window?.minimize()
   }
 
+  isFocused(): boolean {
+    return this.window?.isFocused() ?? false
+  }
+
+  /**
+   * Give the keyboard back to the app that had it before a hotkey asked to type in the notes
+   * (the chart, usually), leaving the notes where they are and visible. On Windows, blur()
+   * activates the next visible window in z-order, which is the window that was active before.
+   * Kept to this one function so the method can be swapped if Windows hands the keyboard to
+   * the taskbar instead: `win.minimize(); win.showInactive()` gives it to the previous app.
+   */
+  giveKeyboardBack(): 'blur' | 'none' {
+    const win = this.window
+    if (!win || !win.isVisible() || !win.isFocused()) return 'none'
+    win.blur()
+    return 'blur'
+  }
+
+  /** The notes window when it is visible and docked to a half of a display (snapshots cut it away). */
+  dockedRect(): { bounds: Rect; displayId: number } | null {
+    const win = this.window
+    if (!win || !this.isShown() || win.isMaximized() || this.dock === 'custom') return null
+    return { bounds: win.getBounds(), displayId: this.currentDisplay().id }
+  }
+
   toggleMaximize(): void {
     const win = this.window
     if (!win) return

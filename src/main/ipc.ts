@@ -4,23 +4,28 @@
  */
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { app, dialog, ipcMain, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, clipboard, dialog, ipcMain, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { z } from 'zod'
 import { isValidAccelerator } from '@shared/accelerator'
 import { isOpenableExternalUrl } from '@shared/content'
+import { bindingsFromPreferences, HOTKEY_IDS, preferencesFromBindings } from '@shared/hotkeys'
 import { IPC } from '@shared/ipc'
 import type {
   AppInfo,
   ExportResult,
   ImportPreview,
   ImportResult,
+  HotkeyStatus,
+  HotkeyStatuses,
   Preferences,
   RichDoc,
   SessionInfo,
+  SessionLogResult,
   ShortcutStatus,
   Snapshot
 } from '@shared/types'
-import { applyAutostart, autostartSupported } from './autostart'
+import { autostartSupported } from './autostart'
+import type { HotkeyController } from './hotkeys'
 import type { ShortcutManager } from './shortcut'
 import { MAX_IMAGE_BYTES, MAX_PREVIEW_BYTES } from './store/attachments'
 import { BACKUP_EXTENSION, BackupReader, exportBackup, importBackup, summarize, timestampForFile } from './store/backup'
@@ -59,6 +64,12 @@ const zImport = z.object({ token: z.string().max(100), mode: z.enum(['merge', 'r
 const zPointer = z.boolean()
 // Any finite number is accepted and then held to the allowed range by the window manager.
 const zOpacityPreview = z.number().nullable()
+const zHotkeyId = z.enum(HOTKEY_IDS)
+const zSetHotkey = z.object({ id: zHotkeyId, accelerator: z.string().max(64) })
+const zSetHotkeyEnabled = z.object({ id: zHotkeyId, enabled: z.boolean() })
+const zMoment = z.number().int().nonnegative().max(8.64e15)
+const zContracts = z.number().int().nonnegative().max(1_000_000)
+const zToken = z.number().int().positive()
 
 function toBytes(value: ArrayBuffer | ArrayBufferView): Uint8Array {
   if (value instanceof ArrayBuffer) return new Uint8Array(value)
@@ -69,6 +80,7 @@ export interface IpcContext {
   library: Library
   windows: WindowManager
   shortcuts: ShortcutManager
+  hotkeys: HotkeyController
   session: SessionInfo
   /** Apply preference side effects (topmost flag, startup entry, shortcut). */
   applyPreferences: (previous: Preferences, next: Preferences) => void
@@ -76,11 +88,11 @@ export interface IpcContext {
   /** The window reports whether the open note holds writing that is not stored yet. */
   setUnsaved: (unsaved: boolean) => void
   /** Test-only switches; all false in normal use. */
-  testHooks: { failSaves: boolean; quitChoice: 'ask' | 'keep' | 'quit' }
+  testHooks: { failSaves: boolean; quitChoice: 'ask' | 'keep' | 'quit'; clockOffsetMs: number }
 }
 
 export function registerIpc(context: IpcContext): void {
-  const { library, windows, shortcuts } = context
+  const { library, windows, shortcuts, hotkeys } = context
   // Only the path is remembered between the preview and the import. The archive itself is
   // closed in between, so the file is never held open while the user decides (on Windows an
   // open file cannot be moved, renamed or deleted).
@@ -123,8 +135,10 @@ export function registerIpc(context: IpcContext): void {
       preferences: library.getPreferences(),
       session: context.session,
       shortcut: shortcuts.status(),
+      hotkeys: shortcuts.statuses(),
       window: windows.status(),
-      app: appInfo()
+      app: appInfo(),
+      clockOffsetMs: context.testHooks.clockOffsetMs
     }
   })
 
@@ -167,27 +181,61 @@ export function registerIpc(context: IpcContext): void {
   handle(IPC.setPreferences, (payload): Preferences => {
     const previous = library.getPreferences()
     const patch = z.record(z.string(), z.unknown()).parse(payload)
-    // The shortcut has its own channel because changing it can fail.
+    // Hotkeys have their own channels because changing them can fail.
     delete patch.shortcut
+    delete patch.shortcutEnabled
+    delete patch.hotkeys
     if (patch.launchAtStartup === true && !autostartSupported()) delete patch.launchAtStartup
     const next = library.setPreferences(patch)
     context.applyPreferences(previous, next)
     return next
   })
 
+  /** Store what the hotkeys now are, and let the window know. */
+  const storeBindings = (): void => {
+    const previous = library.getPreferences()
+    context.applyPreferences(previous, library.setPreferences(preferencesFromBindings(shortcuts.bindings())))
+  }
+
+  // The show/hide shortcut alone, as before there were several.
   handle(IPC.setShortcut, (payload): { status: ShortcutStatus; accepted: boolean } => {
     const accelerator = z.string().max(64).parse(payload)
     if (!isValidAccelerator(accelerator)) {
-      return { status: { accelerator, registered: false, error: 'That key combination cannot be used as a global shortcut.' }, accepted: false }
+      return { status: { accelerator, enabled: true, registered: false, error: 'That key combination cannot be used as a global shortcut.' }, accepted: false }
     }
-    const result = shortcuts.change(accelerator)
-    if (result.accepted) library.setPreferences({ shortcut: accelerator })
-    return result
+    const result = shortcuts.change('toggle', accelerator)
+    if (result.accepted) storeBindings()
+    const { id: _id, ...status } = result.status
+    return { status, accepted: result.accepted }
+  })
+
+  handle(IPC.setHotkey, (payload) => {
+    const { id, accelerator } = zSetHotkey.parse(payload)
+    const result = shortcuts.change(id, accelerator)
+    if (result.accepted) storeBindings()
+    return { ...result, statuses: shortcuts.statuses() }
+  })
+
+  handle(IPC.setHotkeyEnabled, (payload): { status: HotkeyStatus; accepted: boolean; statuses: HotkeyStatuses } => {
+    const { id, enabled } = zSetHotkeyEnabled.parse(payload)
+    const result = shortcuts.setEnabled(id, enabled)
+    if (result.accepted) storeBindings()
+    return { ...result, statuses: shortcuts.statuses() }
   })
 
   handle(IPC.suspendShortcut, (payload) => {
     shortcuts.suspend(z.boolean().parse(payload))
     return shortcuts.status()
+  })
+
+  handle(IPC.ensureSessionLog, (payload): SessionLogResult => {
+    assertWritable()
+    return library.ensureSessionLog(zMoment.parse(payload))
+  })
+
+  // Only a whole number of contracts, never anything else: the calculator does arithmetic only.
+  handle(IPC.copyContracts, (payload) => {
+    clipboard.writeText(String(zContracts.parse(payload)))
   })
 
   handle(IPC.windowAction, (payload) => {
@@ -280,9 +328,9 @@ export function registerIpc(context: IpcContext): void {
       const result = await importBackup(library, reader, mode, { appVersion: app.getVersion() })
       if (result.safetyBackupPath) revealable.add(result.safetyBackupPath)
       if (mode === 'replace') {
-        const next = library.getPreferences()
-        // A restored shortcut may be taken on this machine; keep the working one in that case.
-        if (next.shortcut !== previous.shortcut && !shortcuts.change(next.shortcut).accepted) library.setPreferences({ shortcut: previous.shortcut })
+        // A restored hotkey may be taken on this machine; the working one is kept in that case.
+        shortcuts.apply(bindingsFromPreferences(library.getPreferences()))
+        library.setPreferences(preferencesFromBindings(shortcuts.bindings()))
         context.applyPreferences(previous, library.getPreferences())
         library.setSession({ openNoteId: null })
       }
@@ -326,6 +374,12 @@ export function registerIpc(context: IpcContext): void {
     if (event.sender !== windows.window?.webContents || typeof token !== 'string') return
     // Anything other than an explicit "false" counts as saved (nothing was pending).
     windows.confirmFlush(token, saved !== false)
+  })
+
+  ipcMain.on(IPC.endTyping, (event, token: unknown) => {
+    if (!fromApp(event)) return
+    const parsed = zToken.safeParse(token)
+    if (parsed.success) hotkeys.endTyping(parsed.data)
   })
 
   ipcMain.on(IPC.unsaved, (event, unsaved: unknown) => {

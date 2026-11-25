@@ -2,6 +2,9 @@
  * Shared data model. Everything here is plain JSON so it can cross the IPC bridge,
  * be written to SQLite, and be exported in a backup without translation.
  */
+import { DEFAULT_CANDLE_MINUTES, type CandleMinutes } from './candles'
+import { DEFAULT_HOTKEYS, type HotkeyBindings, type HotkeyId } from './hotkeys'
+import type { InstrumentKey, StopUnit } from './risk'
 
 /** ProseMirror/Tiptap-compatible structured document. This is the source of truth for note content. */
 export interface RichMark {
@@ -97,6 +100,10 @@ export interface Preferences {
   launchAtStartup: boolean
   /** Electron accelerator string, e.g. "Control+Shift+Space". */
   shortcut: string
+  /** The show/hide shortcut is registered at all (it can be switched off in Settings). */
+  shortcutEnabled: boolean
+  /** The trading hotkeys (quick note, snapshot, risk calculator, ...). */
+  hotkeys: HotkeyBindings
   fontFamily: FontKey
   fontSize: number
   theme: ThemeKey
@@ -110,6 +117,17 @@ export interface Preferences {
   opacitySolidOnHover: boolean
   /** The formatting bar under an open note is folded away. */
   formatBarCollapsed: boolean
+  /** The see-through opacity last chosen (below 1); the see-through hotkey goes back to it. */
+  seeThroughOpacity: number
+  /** The candle countdown chip is showing in the title bar. */
+  candleTimer: boolean
+  candleMinutes: CandleMinutes
+  /** A soft chime at each candle close. */
+  candleChime: boolean
+  /** Risk calculator: the instrument, dollar risk (in cents) and stop unit last used. */
+  riskInstrument: InstrumentKey
+  riskCents: number | null
+  riskUnit: StopUnit
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -123,15 +141,33 @@ export const DEFAULT_PREFERENCES: Preferences = {
   reducedMotion: 'system',
   windowOpacity: 1,
   opacitySolidOnHover: false,
-  formatBarCollapsed: false
+  formatBarCollapsed: false,
+  shortcutEnabled: true,
+  hotkeys: DEFAULT_HOTKEYS,
+  seeThroughOpacity: 0.7,
+  candleTimer: false,
+  candleMinutes: DEFAULT_CANDLE_MINUTES,
+  candleChime: true,
+  riskInstrument: 'MES',
+  riskCents: null,
+  riskUnit: 'points'
 }
 
 export interface ShortcutStatus {
   accelerator: string
+  /** False when the user switched this shortcut off in Settings. */
+  enabled: boolean
   registered: boolean
   /** Human-readable reason when registration failed. */
   error: string | null
 }
+
+/** One global hotkey as the system has it right now. */
+export interface HotkeyStatus extends ShortcutStatus {
+  id: HotkeyId
+}
+
+export type HotkeyStatuses = Record<HotkeyId, HotkeyStatus>
 
 export interface WindowStatus {
   dock: DockSide | 'custom'
@@ -163,8 +199,11 @@ export interface Snapshot {
   trashCount: number
   session: SessionInfo
   shortcut: ShortcutStatus
+  hotkeys: HotkeyStatuses
   window: WindowStatus
   app: AppInfo
+  /** Test runs can set the app's clock; 0 in normal use. */
+  clockOffsetMs: number
 }
 
 export interface TrashEntry {
@@ -276,6 +315,30 @@ export interface MainEvents {
   'preferences-changed': Preferences
   'data-replaced': null
   'command': { name: 'find' | 'settings' | 'new-note' }
+  'hotkey-status': HotkeyStatuses
+  /** A hotkey that the window acts on was pressed (or chosen in the tray). */
+  'hotkey': HotkeyEvent
+  'snapshot': SnapshotEvent
+  /** A candle closed (sent by the main process, which keeps time while the window is hidden). */
+  'candle-close': { at: number; minutes: CandleMinutes }
+  /** Test runs only: the app's clock was moved. */
+  'clock': { offsetMs: number }
+}
+
+export type HotkeyEvent =
+  /** Typing hotkeys: the window has the keyboard until it calls endTyping(token). */
+  | { action: 'quickNote' | 'risk'; token: number; at: number; hadKeyboard: boolean }
+  | { action: 'openLog'; at: number }
+  | { action: 'seeThrough'; opacity: number }
+
+export type SnapshotEvent =
+  | { ok: true; at: number; attachment: AttachmentMeta; width: number; height: number; caption: string; windowShown: boolean }
+  | { ok: false; at: number; message: string; windowShown: boolean }
+
+export interface SessionLogResult {
+  note: Note
+  layout: BoardLayout
+  created: boolean
 }
 
 export const ATTACHMENT_SCHEME = 'tn-attachment'

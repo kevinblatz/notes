@@ -13,12 +13,14 @@ import { BackupPanel } from './components/BackupPanel'
 import { Board } from './components/Board'
 import { NoteEditor } from './components/editor/NoteEditor'
 import { FindPalette } from './components/FindPalette'
+import { HotkeyPanels } from './components/HotkeyPanels'
 import { ImagePreview } from './components/ImagePreview'
 import { SettingsPanel } from './components/SettingsPanel'
 import { TitleBar } from './components/TitleBar'
 import { Toasts } from './components/Toasts'
 import { TrashPanel } from './components/TrashPanel'
 import { flushAll, followStoredOpacity, initialize, openPanel, startDraft, stepWindowOpacity, trackPointerForOpacity, undoLast } from './state/actions'
+import { handleCandleClose, handleHotkey, handleSnapshot } from './state/hotkeys'
 import { setState, useStore } from './state/store'
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -45,6 +47,12 @@ export function App() {
       // The main process asks for pending edits to be written before hiding or quitting.
       api.on('flush-request', ({ token }) => void flushAll().then((saved) => api.flushDone(token, saved))),
       api.on('shortcut-status', (status) => setState({ shortcut: status })),
+      api.on('hotkey-status', (statuses) => setState({ hotkeys: statuses })),
+      // Hotkeys the window acts on: quick note, risk calculator, today's log, see-through.
+      api.on('hotkey', handleHotkey),
+      api.on('snapshot', (event) => void handleSnapshot(event)),
+      api.on('candle-close', handleCandleClose),
+      api.on('clock', ({ offsetMs }) => setState({ clockOffsetMs: offsetMs })),
       api.on('window-status', (status) => setState({ windowStatus: status })),
       api.on('preferences-changed', (next) => setState({ prefs: next })),
       // "Solid while I use it" needs to know when the pointer is over the notes.
@@ -92,6 +100,8 @@ export function App() {
         stepWindowOpacity(opacitySteps, 'shortcut')
         return
       }
+      // Quick note and the risk calculator keep the keyboard to themselves while open.
+      if (useStore.getState().capture) return
       const key = event.key.toLowerCase()
       if (key === 'k' && !event.shiftKey) {
         event.preventDefault()
@@ -126,7 +136,7 @@ export function App() {
   return (
     <div className={`app${returning ? ' is-returning' : ''}`} data-view={view.mode} data-ready={ready}>
       <TitleBar />
-      {!shortcut.registered && !noticeDismissed && ready ? (
+      {shortcut.enabled && !shortcut.registered && !noticeDismissed && ready ? (
         <div className="banner" role="alert" data-testid="shortcut-banner">
           <span>{shortcut.error ?? 'The show/hide shortcut could not be registered.'} It will not open your notes until you pick another.</span>
           <button type="button" className="link-button" onClick={() => openPanel('settings')}>
@@ -160,6 +170,7 @@ export function App() {
       {panel === 'backup' ? <BackupPanel /> : null}
       {panel === 'trash' ? <TrashPanel /> : null}
       <ImagePreview />
+      <HotkeyPanels />
       <Toasts />
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {announcement}

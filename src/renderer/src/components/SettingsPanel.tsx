@@ -1,90 +1,14 @@
-/** Settings: only the essentials. Window, shortcut, writing defaults, appearance, backup. */
-import { useLayoutEffect, useState } from 'react'
-import { acceleratorFromEvent, formatAccelerator } from '@shared/accelerator'
+/** Settings: only the essentials. Window, hotkeys, trading tools, writing defaults, appearance, backup. */
 import { FONT_KEYS, FONT_LABELS, FONT_SIZES } from '@shared/content'
 import { OPACITY_SHORTCUT_LABELS, opacityPercent, THEME_LABELS, THEMES } from '@shared/preferences'
 import type { DockSide, FontKey, ReducedMotion, ThemeKey } from '@shared/types'
 import { api } from '../lib/api'
-import { useEscape } from '../lib/escape'
 import { openPanel, setSolidWhileInUse, toast, updatePreferences } from '../state/actions'
 import { setState, useStore } from '../state/store'
+import { HotkeySettings, TradingSettings } from './HotkeySettings'
 import { Sheet } from './Sheet'
 import { OpacitySlider, useShownOpacity } from './TitleBar'
 import { Segmented, Switch } from './ui'
-
-function ShortcutRecorder() {
-  const shortcut = useStore((s) => s.shortcut)
-  const [recording, setRecording] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-
-  const stop = (): void => {
-    setRecording(false)
-    void api.suspendShortcut(false).then((status) => setState({ shortcut: status }))
-  }
-  useEscape(recording, stop)
-
-  // A layout effect, so the key listener is in place in the same frame the button changes:
-  // a key pressed immediately after the click is not missed.
-  useLayoutEffect(() => {
-    if (!recording) return
-    // Release the current shortcut while listening, so pressing it is captured here
-    // instead of hiding the window.
-    void api.suspendShortcut(true)
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') return
-      event.preventDefault()
-      event.stopPropagation()
-      const captured = acceleratorFromEvent(event)
-      if (!captured.ok) {
-        if (captured.reason === 'needs-modifier') setMessage('Include Ctrl, Alt or the Windows key so the shortcut does not interfere with typing.')
-        else if (captured.reason === 'unsupported-key') setMessage('That key cannot be used. Try a letter, number, Space or a function key.')
-        return
-      }
-      setRecording(false)
-      void api.setShortcut(captured.accelerator).then(async ({ status, accepted }) => {
-        if (accepted) {
-          setState((s) => ({ shortcut: status, prefs: { ...s.prefs, shortcut: status.accelerator }, shortcutNoticeDismissed: false }))
-          setMessage(`${formatAccelerator(status.accelerator)} now shows and hides your notes.`)
-        } else {
-          // Keep whatever was working before and say why the new one was refused.
-          setState({ shortcut: await api.suspendShortcut(false) })
-          setMessage(`${status.error ?? 'That shortcut is not available.'} Choose a different combination.`)
-        }
-      })
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [recording])
-
-  return (
-    <div className="setting-block">
-      <div className="setting-row">
-        <div>
-          <div className="setting-label">Show or hide notes</div>
-          <div className="setting-help">Works from any app, including while your chart has focus.</div>
-        </div>
-        <button
-          type="button"
-          className={`shortcut-button${recording ? ' is-recording' : ''}`}
-          onClick={() => {
-            setMessage(null)
-            if (recording) stop()
-            else setRecording(true)
-          }}
-          data-testid="shortcut-button"
-        >
-          {recording ? 'Press the new shortcut…' : formatAccelerator(shortcut.accelerator)}
-        </button>
-      </div>
-      {!shortcut.registered && !recording ? (
-        <p className="setting-warning" role="alert">
-          {shortcut.error ?? 'This shortcut could not be registered.'} Click the shortcut above and press a different combination.
-        </p>
-      ) : null}
-      {message ? <p className="setting-help" role="status">{message}</p> : null}
-    </div>
-  )
-}
 
 /** The same slider and switch as the title bar's opacity control. */
 function OpacitySettings() {
@@ -168,9 +92,14 @@ export function SettingsPanel() {
         </div>
       </section>
 
-      <section className="setting-section">
-        <h2>Shortcut</h2>
-        <ShortcutRecorder />
+      <section className="setting-section" aria-label="Hotkeys">
+        <h2>Hotkeys</h2>
+        <HotkeySettings />
+      </section>
+
+      <section className="setting-section" aria-label="Candle timer and risk calculator">
+        <h2>Candle timer and risk calculator</h2>
+        <TradingSettings />
       </section>
 
       <section className="setting-section">

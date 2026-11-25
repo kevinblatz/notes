@@ -6,6 +6,10 @@ import type { DockSide } from '@shared/types'
 export interface TrayActions {
   toggle: () => void
   isShown: () => boolean
+  /** The quick note strip, as its hotkey opens it. */
+  quickNote: () => void
+  /** Capture the chart into today's log, as its hotkey does. */
+  snapshot: () => void
   dock: (side: DockSide) => void
   isAlwaysOnTop: () => boolean
   setAlwaysOnTop: (flag: boolean) => void
@@ -32,6 +36,7 @@ export class TrayController {
   private tray: Tray | null = null
   private menu: Menu | null = null
   private iconLoaded = false
+  private status: string | null = null
 
   constructor(
     private readonly iconPath: string,
@@ -43,7 +48,7 @@ export class TrayController {
     const image = nativeImage.createFromPath(this.iconPath)
     this.iconLoaded = !image.isEmpty()
     this.tray = new Tray(image)
-    this.tray.setToolTip('Trading Notes')
+    this.tray.setToolTip(this.tooltip())
     this.tray.on('click', () => this.actions.toggle())
     this.refresh()
   }
@@ -61,6 +66,8 @@ export class TrayController {
     }))
     const menu = Menu.buildFromTemplate([
       { label: this.actions.isShown() ? 'Hide notes' : 'Show notes', click: () => this.actions.toggle() },
+      { label: 'Quick note', click: () => this.actions.quickNote() },
+      { label: 'Snapshot chart', click: () => this.actions.snapshot() },
       { type: 'separator' },
       { label: 'Dock to right half', click: () => this.actions.dock('right') },
       { label: 'Dock to left half', click: () => this.actions.dock('left') },
@@ -76,6 +83,24 @@ export class TrayController {
     ])
     this.menu = menu
     this.tray.setContextMenu(menu)
+  }
+
+  private tooltip(): string {
+    return this.status ? `Trading Notes\n${this.status}` : 'Trading Notes'
+  }
+
+  /**
+   * A quiet line under the name in the icon's tooltip ("Last chart snapshot 10:32:14"): the
+   * feedback for a hotkey used while the notes are hidden. No balloon, no window.
+   */
+  setStatus(text: string | null): void {
+    this.status = text
+    this.tray?.setToolTip(this.tooltip())
+  }
+
+  /** For the automated desktop tests: the tooltip as it reads now. */
+  testTooltip(): string {
+    return this.tooltip()
   }
 
   /** For start-up diagnostics: whether the icon exists and its image file was readable. */

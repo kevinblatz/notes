@@ -3,8 +3,19 @@
  * else is view state (which screen is showing, open panels, toasts, undo history).
  */
 import { create } from 'zustand'
+import { bindingsFromPreferences, HOTKEY_IDS } from '@shared/hotkeys'
 import type { MoveAnchor } from '@shared/layout'
-import { DEFAULT_PREFERENCES, type AppInfo, type BoardLayout, type Note, type Placement, type Preferences, type ShortcutStatus, type WindowStatus } from '@shared/types'
+import {
+  DEFAULT_PREFERENCES,
+  type AppInfo,
+  type BoardLayout,
+  type HotkeyStatuses,
+  type Note,
+  type Placement,
+  type Preferences,
+  type ShortcutStatus,
+  type WindowStatus
+} from '@shared/types'
 
 /** Where to put the caret when a note opens: the block and character the user clicked. */
 export interface CaretHint {
@@ -38,6 +49,17 @@ export type UndoEntry =
   | { kind: 'layout'; before: BoardLayout; after: BoardLayout; noteId: string | null; anchor: MoveAnchor | null; label: string }
   | { kind: 'trash'; noteId: string; label: string }
 
+/** Quick note or the risk calculator, open because its hotkey was pressed. */
+export interface CaptureState {
+  kind: 'quickNote' | 'risk'
+  /** Names the typing session in the main process; ending it gives the keyboard back. */
+  token: number
+  /** When the hotkey was pressed (app clock): the time a quick note line carries. */
+  at: number
+  /** Counts presses within the session, so a press during a save keeps the strip open for another line. */
+  presses: number
+}
+
 export interface ImagePreviewState {
   attachmentId: string
   caption: string
@@ -52,6 +74,7 @@ export interface AppState {
   trashCount: number
   prefs: Preferences
   shortcut: ShortcutStatus
+  hotkeys: HotkeyStatuses
   windowStatus: WindowStatus
   app: AppInfo | null
   view: View
@@ -67,6 +90,16 @@ export interface AppState {
   undo: UndoEntry[]
   /** Screen-reader announcement (aria-live). */
   announcement: string
+  capture: CaptureState | null
+  /** Added to Date.now() for the app's clock; only the automated tests move it. */
+  clockOffsetMs: number
+  /** Candle closes announced by the main process since the window loaded. */
+  candleCloses: number
+}
+
+function defaultStatuses(): HotkeyStatuses {
+  const bindings = bindingsFromPreferences(DEFAULT_PREFERENCES)
+  return Object.fromEntries(HOTKEY_IDS.map((id) => [id, { id, ...bindings[id], registered: bindings[id].enabled, error: null }])) as HotkeyStatuses
 }
 
 export const useStore = create<AppState>(() => ({
@@ -77,7 +110,8 @@ export const useStore = create<AppState>(() => ({
   pins: [],
   trashCount: 0,
   prefs: DEFAULT_PREFERENCES,
-  shortcut: { accelerator: DEFAULT_PREFERENCES.shortcut, registered: true, error: null },
+  shortcut: { accelerator: DEFAULT_PREFERENCES.shortcut, enabled: true, registered: true, error: null },
+  hotkeys: defaultStatuses(),
   windowStatus: { dock: 'right', alwaysOnTop: true, focused: true, maximized: false },
   app: null,
   view: { mode: 'board' },
@@ -89,8 +123,16 @@ export const useStore = create<AppState>(() => ({
   recoveredNotice: false,
   shortcutNoticeDismissed: false,
   undo: [],
-  announcement: ''
+  announcement: '',
+  capture: null,
+  clockOffsetMs: 0,
+  candleCloses: 0
 }))
 
 export const getState = useStore.getState
 export const setState = useStore.setState
+
+/** The app's clock: the system clock, unless an automated test moved it. */
+export function appNow(): number {
+  return Date.now() + getState().clockOffsetMs
+}

@@ -3,6 +3,7 @@
  * of functions on `window.tn`; it never sees ipcRenderer, Node, or the file system.
  */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import type { HotkeyId } from '@shared/hotkeys'
 import { IPC, type WindowAction } from '@shared/ipc'
 import type {
   CreateNoteInput,
@@ -38,6 +39,11 @@ const api: TnApi = {
   setPreferences: (patch: Partial<Preferences>) => ipcRenderer.invoke(IPC.setPreferences, patch),
   setShortcut: (accelerator: string) => ipcRenderer.invoke(IPC.setShortcut, accelerator),
   suspendShortcut: (flag: boolean) => ipcRenderer.invoke(IPC.suspendShortcut, flag),
+  setHotkey: (id: HotkeyId, accelerator: string) => ipcRenderer.invoke(IPC.setHotkey, { id, accelerator }),
+  setHotkeyEnabled: (id: HotkeyId, enabled: boolean) => ipcRenderer.invoke(IPC.setHotkeyEnabled, { id, enabled }),
+  endTyping: (token: number) => ipcRenderer.send(IPC.endTyping, token),
+  ensureSessionLog: (at: number) => ipcRenderer.invoke(IPC.ensureSessionLog, at),
+  copyContracts: (count: number) => ipcRenderer.invoke(IPC.copyContracts, count),
   windowAction: (action: WindowAction) => ipcRenderer.invoke(IPC.windowAction, action),
   setSession: (openNoteId: string | null) => ipcRenderer.invoke(IPC.setSession, openNoteId),
   exportBackup: () => ipcRenderer.invoke(IPC.exportBackup),

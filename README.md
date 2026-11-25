@@ -52,10 +52,38 @@ ask for them with the shortcut.
 | Do this | To |
 | --- | --- |
 | **Ctrl + Shift + Space** (from any app) | Show or hide the notes. Change it in Settings. |
-| Click the tray icon | Show or hide the notes. Right-click for dock side, always-on-top, opacity and Quit. |
+| Click the tray icon | Show or hide the notes. Right-click for a quick note, a chart snapshot, dock side, always-on-top, opacity and Quit. |
 | Close button, or Alt + F4 | Hide to the tray. Your notes are saved first. |
 | Gear, then **Quit Trading Notes** | Actually exit. |
-| **Ctrl + ,** | Open Settings: shortcut, dock side, always on top, opacity, start with Windows, theme, font and size. |
+| **Ctrl + ,** | Open Settings: hotkeys, dock side, always on top, opacity, start with Windows, candle chime, risk calculator defaults, theme, font and size. |
+
+**Hotkeys for trading**
+
+These work from any app, including while Chrome and your chart have the keyboard. They use
+Ctrl + Alt because Chrome already uses Ctrl + Shift + N, T, R and O, and a global hotkey would
+take those away from Chrome. Each one can be given another combination, or switched off, in
+Settings (**Ctrl + ,**) → *Hotkeys*.
+
+| Press | To |
+| --- | --- |
+| **Ctrl + Alt + N** | **Quick note.** A slim one-line strip opens at the top of the notes. Type and press **Enter**: the line goes into today's session log as `10:32:14 — your text` (your local time, 24-hour). **Esc** cancels and writes nothing. Either way the keyboard goes back to where it was: hidden notes hide again, and if Chrome had the keyboard, Chrome gets it back. A note you were writing stays exactly as it was, with the caret where you left it. |
+| **Ctrl + Alt + S** | **Snapshot the chart.** The Chrome window showing your TradingView chart is captured at full size and added to today's log as a picture, captioned with the time and the symbol and price from the tab title (`10:32:14 · ES1! 6,123.25`; just the time if the title does not show them). The notes do not take the keyboard. Without a TradingView window, the screen under the pointer is captured instead, minus the notes when they are docked beside the chart. A short message confirms it (or, while the notes are hidden, the tray icon's tooltip shows *Last chart snapshot*); if capturing is not possible, the message says so. |
+| **Ctrl + Alt + R** | **Risk calculator.** Pick MES, ES, MNQ or NQ, type the dollars you are willing to lose and the stop distance in points (or ticks: the *pts / ticks* toggle), or type an entry and a stop price to fill the distance. It shows the number of contracts (risk ÷ (stop × point value), rounded down), what that size really risks, and the risk per contract; if not even one contract fits it says *Stop too wide for this risk*. A stop between ticks is rounded up to the next tick. **Enter** copies the contract count to the clipboard and closes; **Esc** closes. The keyboard goes back as for a quick note. The dollar risk, the unit and the instrument are remembered. It only does the arithmetic: it never places or suggests an order. |
+| **Ctrl + Alt + T** | **Candle timer.** Shows or hides a small countdown in the title bar to the next candle close, for example `5m 2:13`. Click it to choose 1, 5 or 15 minutes or 1 hour (remembered; 5 minutes at first), to turn the chime off, or to hide it. Candles close on the minute boundaries of your computer's clock (1-hour candles on the hour). The last 10 seconds show in teal; at the close there is a short soft chime and a brief pulse (no pulse with Reduced motion). It keeps time while the notes are hidden or minimised. Off at first; nothing runs while it is off. |
+| **Ctrl + Alt + O** | **See-through on/off.** Switch between solid and the see-through opacity you chose last (70 % until you choose one). The keyboard stays where it is. |
+| **Ctrl + Alt + L** | **Open today's log.** Shows the notes, ready to type at the end of today's session log. |
+
+*Today's session log* is one ordinary note per day, titled like *Session log · Wed 25 Nov* and
+placed at the top of the board the first time you use it that day. Its lines are normal
+paragraphs: searchable, editable and movable like any note. Delete it and the next quick note
+starts a new one. If the log is open in the editor when a quick note or snapshot arrives, it is
+added right there, below what you are typing.
+
+On some keyboard layouts (German, French, Polish and others) **Ctrl + Alt** is the same as
+**AltGr**, so Ctrl + Alt + a letter may be a key you type characters with. If a hotkey types a
+character instead of doing its job, or takes a character you need, give it another combination
+in Settings. When Windows or another app already owns a combination, Settings says so and the
+hotkey keeps the combination it had.
 
 **Writing**
 

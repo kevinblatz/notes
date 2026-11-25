@@ -5,7 +5,7 @@
 import { isNoteEmpty, noteLabel, setTaskChecked } from '@shared/content'
 import { anchorOf, describePosition, findNote, keyboardMove, layoutsEqual, moveNote, placeByAnchor, type MoveDirection } from '@shared/layout'
 import { clampOpacity, formatOpacity, stepOpacity } from '@shared/preferences'
-import type { BoardLayout, Note, Placement, Preferences } from '@shared/types'
+import type { BoardLayout, Note, Placement, Preferences, RichNode } from '@shared/types'
 import { api } from '../lib/api'
 import { captureBoardPositions } from '../lib/flip'
 import { newId } from '../lib/ids'
@@ -20,6 +20,37 @@ let spotlightCounter = 0
 let activeSaver: NoteSaver | null = null
 export function setActiveSaver(saver: NoteSaver | null): void {
   activeSaver = saver
+}
+
+/** What the session log needs from the open editor. */
+export interface EditorHandle {
+  noteId: string
+  /** The stored revision the editor opened with. */
+  openedAt: number
+  /** Add log entries at the end (before empty lines left there), without moving the caret. */
+  appendBlocks(blocks: RichNode[]): void
+  /**
+   * Take the caret from the page into the editor's own state before the keyboard leaves. The
+   * browser moves the caret for arrow keys and the editor reads it a moment later; the hotkey
+   * may come in between.
+   */
+  captureSelection(): void
+  /** Put the keyboard back into the text, with the caret where it was. */
+  restoreFocus(): void
+  /** Caret to the very end, ready to write. */
+  focusEnd(): void
+}
+
+let activeEditor: EditorHandle | null = null
+export function setActiveEditor(handle: EditorHandle | null): void {
+  activeEditor = handle
+}
+/** The open editor, when it is showing this note. */
+export function editorFor(noteId: string): EditorHandle | null {
+  return activeEditor && activeEditor.noteId === noteId ? activeEditor : null
+}
+export function currentEditor(): EditorHandle | null {
+  return activeEditor
 }
 
 let reportedUnsaved = false
@@ -53,8 +84,10 @@ export async function initialize(restoreSession = true): Promise<void> {
       trashCount: snapshot.trashCount,
       prefs: snapshot.preferences,
       shortcut: snapshot.shortcut,
+      hotkeys: snapshot.hotkeys,
       windowStatus: snapshot.window,
-      app: snapshot.app
+      app: snapshot.app,
+      clockOffsetMs: snapshot.clockOffsetMs
     })
     const open = restoreSession ? snapshot.session.openNoteId : null
     if (open && snapshot.notes.some((n) => n.id === open)) {
@@ -71,6 +104,7 @@ export async function initialize(restoreSession = true): Promise<void> {
 /** Reload everything after an import replaced or extended the collection. */
 export async function reloadAfterImport(): Promise<void> {
   activeSaver = null
+  activeEditor = null
   noteSaveState({ kind: 'idle' })
   setState({ view: { mode: 'board' }, undo: [], preview: null, recoveredNotice: false })
   void api.setSession(null)
@@ -195,6 +229,7 @@ async function leaveNote(): Promise<boolean> {
     }
   }
   activeSaver = null
+  activeEditor = null
   setState({ view: { mode: 'board' }, recoveredNotice: false, spotlight: spotlightId ? { noteId: spotlightId, token: ++spotlightCounter } : null })
   void api.setSession(null)
   return true
@@ -585,6 +620,11 @@ export function stepWindowOpacity(steps: number, source: 'wheel' | 'shortcut'): 
   const next = stepOpacity(shownOpacity(), steps)
   adjustOpacity(next, 'soon', { flash: true })
   if (source === 'shortcut') announce(`Window opacity ${formatOpacity(next)}`)
+}
+
+/** Briefly show the opacity under the title bar icon (after the see-through hotkey changed it). */
+export function flashOpacityReadout(): void {
+  setOpacityLive({ ...opacityLive, flash: opacityLive.flash + 1 })
 }
 
 export function setSolidWhileInUse(on: boolean): void {

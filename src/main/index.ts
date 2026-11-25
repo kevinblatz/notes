@@ -4,15 +4,19 @@
  */
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, dialog, session } from 'electron'
+import { app, desktopCapturer, dialog, nativeImage, powerMonitor, screen, session } from 'electron'
+import { bindingsFromPreferences, HOTKEY_IDS, type HotkeyId } from '@shared/hotkeys'
 import type { Preferences, SessionInfo } from '@shared/types'
 import appIcon from '../../resources/icon.png?asset'
 import trayIco from '../../resources/tray.ico?asset'
 import trayPng from '../../resources/tray.png?asset'
 import { applyAutostart, AUTOSTART_ARG, readAutostart } from './autostart'
+import { CandleClock } from './candleClock'
+import { HotkeyController } from './hotkeys'
 import { registerIpc } from './ipc'
 import { handleAttachmentRequests, registerAttachmentScheme } from './protocol'
 import { ShortcutManager } from './shortcut'
+import { captureChart, type GetSources } from './snapshot'
 import { Library } from './store/library'
 import { TrayController } from './tray'
 import { WindowManager, type ShowMode } from './windowManager'
@@ -80,7 +84,24 @@ async function main(): Promise<void> {
   session.defaultSession.setPermissionCheckHandler(() => false)
   handleAttachmentRequests(lib)
 
-  const testHooks: { failSaves: boolean; quitChoice: 'ask' | 'keep' | 'quit' } = { failSaves: false, quitChoice: 'ask' }
+  /** A desktopCapturer source as a test describes it: a known picture under a known title. */
+  interface TestSource {
+    id: string
+    name: string
+    display_id?: string
+    png: string
+  }
+  const testHooks: {
+    failSaves: boolean
+    quitChoice: 'ask' | 'keep' | 'quit'
+    /** Added to the clock the hotkeys, the session log and the candle timer go by. */
+    clockOffsetMs: number
+    /** Stand-ins for desktopCapturer's sources; null uses the real thing. */
+    desktopSources: TestSource[] | null
+    /** Makes capturing fail with this message. */
+    captureError: string | null
+  } = { failSaves: false, quitChoice: 'ask', clockOffsetMs: 0, desktopSources: null, captureError: null }
+  const now = (): number => Date.now() + testHooks.clockOffsetMs
 
   const quit = async (): Promise<void> => {
     if (quitInProgress) return
@@ -119,6 +140,7 @@ async function main(): Promise<void> {
     }
     windows?.prepareToQuit()
     shortcuts.dispose()
+    candles.dispose()
     tray?.destroy()
     lib.close()
     quitConfirmed = true
@@ -126,7 +148,18 @@ async function main(): Promise<void> {
   }
 
   const blocked = isTest ? new Set((process.env.TRADING_NOTES_TEST_BLOCKED_SHORTCUTS ?? '').split(',').filter(Boolean)) : new Set<string>()
-  const shortcuts = new ShortcutManager(() => windows?.toggle(), blocked)
+  // Filled in once the window manager and the hotkey actions exist (they need each other).
+  const hotkeyHandlers: Partial<Record<HotkeyId, () => void>> = {}
+  const shortcuts = new ShortcutManager(
+    Object.fromEntries(HOTKEY_IDS.map((id) => [id, () => hotkeyHandlers[id]?.()])) as Record<HotkeyId, () => void>,
+    blocked,
+    () => {
+      windows?.send('hotkey-status', shortcuts.statuses())
+      windows?.send('shortcut-status', shortcuts.status())
+    }
+  )
+  // The candle timer keeps time here, because the window's timers slow down while it is hidden.
+  const candles = new CandleClock(now, (at, minutes) => windows?.send('candle-close', { at, minutes }))
 
   const onStatusChange = (): void => {
     if (!windows) return
@@ -148,6 +181,7 @@ async function main(): Promise<void> {
 
   const applyPreferences = (previous: Preferences, next: Preferences): void => {
     if (previous.alwaysOnTop !== next.alwaysOnTop) manager.setAlwaysOnTop(next.alwaysOnTop)
+    candles.update(next.candleTimer, next.candleMinutes)
     if (previous.launchAtStartup !== next.launchAtStartup) applyAutostart(next.launchAtStartup)
     if (previous.dockSide !== next.dockSide) manager.dockTo(next.dockSide)
     if (previous.windowOpacity !== next.windowOpacity || previous.opacitySolidOnHover !== next.opacitySolidOnHover) manager.updateOpacity()
@@ -155,12 +189,44 @@ async function main(): Promise<void> {
     tray?.refresh()
   }
 
+  // Stand-in sources for the automated tests. Zero-size requests get no picture, as for real.
+  const testSources: GetSources = async (options) => {
+    if (testHooks.captureError) throw new Error(testHooks.captureError)
+    const wanted = options.types
+    return (testHooks.desktopSources ?? [])
+      .filter((source) => wanted.includes(source.id.startsWith('screen:') ? 'screen' : 'window'))
+      .map((source) => ({
+        id: source.id,
+        name: source.name,
+        display_id: source.display_id ?? '',
+        thumbnail: options.thumbnailSize?.width === 0 ? nativeImage.createEmpty() : nativeImage.createFromBuffer(Buffer.from(source.png, 'base64'))
+      }))
+  }
+
+  const hotkeys = new HotkeyController({
+    windows: manager,
+    library: lib,
+    now,
+    applyPreferences,
+    capture: () =>
+      captureChart({
+        getSources: isTest && (testHooks.desktopSources || testHooks.captureError) ? testSources : (options) => desktopCapturer.getSources(options),
+        displays: screen.getAllDisplays(),
+        cursorDisplay: screen.getDisplayNearestPoint(screen.getCursorScreenPoint()),
+        docked: manager.dockedRect(),
+        ownTitle: 'Trading Notes'
+      }),
+    onSnapshotState: (text) => tray?.setStatus(text)
+  })
+  Object.assign(hotkeyHandlers, hotkeys.handlers(() => manager.toggle()))
+
   // Kept up to date by the window, so that it can be read at a moment when there is no time to ask.
   let unsavedInWindow = false
   registerIpc({
     library: lib,
     windows: manager,
     shortcuts,
+    hotkeys,
     session: sessionInfo,
     applyPreferences,
     quit: () => void quit(),
@@ -174,10 +240,15 @@ async function main(): Promise<void> {
   const prefs = lib.getPreferences()
   if (prefs.launchAtStartup && !readAutostart()) applyAutostart(true)
 
-  shortcuts.start(prefs.shortcut)
+  shortcuts.start(bindingsFromPreferences(prefs))
+  candles.update(prefs.candleTimer, prefs.candleMinutes)
+  // After sleep the next close is worked out afresh (timers do not count time asleep reliably).
+  powerMonitor.on('resume', () => candles.reschedule())
 
   const startMode: ShowMode = process.argv.includes('--hidden') ? 'hidden' : process.argv.includes(AUTOSTART_ARG) ? 'inactive' : 'focus'
   const win = manager.create(startMode)
+  win.webContents.on('did-start-loading', () => hotkeys.pageReset())
+  win.on('hide', () => hotkeys.windowHidden())
 
   // Windows is logging off or shutting down: there is no time to ask anything. Have the window
   // write what is pending, and record a clean exit unless the window last reported writing
@@ -198,6 +269,8 @@ async function main(): Promise<void> {
   tray = new TrayController(process.platform === 'win32' ? trayIco : trayPng, {
     toggle: () => manager.toggle(),
     isShown: () => manager.isShown(),
+    quickNote: () => hotkeys.beginTyping('quickNote'),
+    snapshot: () => void hotkeys.snapshot(),
     dock: (side) => {
       lib.setPreferences({ dockSide: side })
       manager.dockTo(side)
@@ -235,6 +308,7 @@ async function main(): Promise<void> {
           electron: process.versions.electron,
           tray: tray ? tray.state() : { created: false, iconLoaded: false },
           shortcut: shortcuts.status(),
+          hotkeys: shortcuts.statuses(),
           alwaysOnTop: win.isAlwaysOnTop(),
           bounds: win.getBounds(),
           dataDir: lib.dataDir
@@ -253,6 +327,22 @@ async function main(): Promise<void> {
 
   if (isTest) {
     // Handles for the automated desktop tests. Never present in a normal run.
-    ;(globalThis as Record<string, unknown>).__tnTest = { library: lib, windows: manager, shortcuts, tray, testHooks, quit }
+    ;(globalThis as Record<string, unknown>).__tnTest = {
+      library: lib,
+      windows: manager,
+      shortcuts,
+      hotkeys,
+      candles,
+      tray,
+      testHooks,
+      quit,
+      /** Move the app's clock to `ms` (the hotkeys, the session log and the candle timer follow). */
+      setNow: (ms: number) => {
+        testHooks.clockOffsetMs = ms - Date.now()
+        manager.send('clock', { offsetMs: testHooks.clockOffsetMs })
+        candles.reschedule()
+      },
+      now
+    }
   }
 }

@@ -13,6 +13,7 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { IMAGE_NODE, isValidId, safeLinkHref } from '@shared/content'
+import type { RichNode } from '@shared/types'
 import { drawingScaleAttr } from '@shared/drawing'
 import { importImageFile } from '../../lib/images'
 import type { CaretHint } from '../../state/store'
@@ -228,6 +229,58 @@ export function removeDrawingNode(editor: Editor, attachmentId: string, hint: nu
   endUndoStep(editor)
   editor.view.focus()
   return true
+}
+
+/**
+ * Add session log entries to the open note: after the last block that holds anything (empty
+ * lines left at the end stay below them), as one undo step, without moving the caret or
+ * scrolling. A picture at the very end gets an empty line after it, as a pasted one does.
+ */
+export function appendLogEntries(editor: Editor, blocks: RichNode[]): void {
+  if (editor.isDestroyed || blocks.length === 0) return
+  const { doc, schema } = editor.state
+  let index = doc.childCount
+  while (index > 0) {
+    const child = doc.child(index - 1)
+    const empty = child.type.name === 'paragraph' && child.textContent.trim() === '' && child.content.content.every((inline) => inline.isText)
+    if (!empty) break
+    index--
+  }
+  let pos = 0
+  for (let i = 0; i < index; i++) pos += doc.child(i).nodeSize
+  const nodes = blocks.map((block) => schema.nodeFromJSON(block))
+  const last = nodes[nodes.length - 1]
+  const paragraph = schema.nodes.paragraph
+  if (last && !last.isTextblock && index === doc.childCount && paragraph) nodes.push(paragraph.create())
+  const tr = editor.state.tr.insert(pos, nodes)
+  tr.setMeta('addToHistory', true)
+  editor.view.dispatch(closeHistory(tr))
+  endUndoStep(editor)
+}
+
+/**
+ * Bring the editor's selection in line with the caret the page shows. The browser moves the
+ * caret for arrow keys itself and the editor reads it on the next selection event; called just
+ * before the keyboard moves elsewhere, so the caret can be put back exactly where it was.
+ */
+export function syncSelectionFromPage(editor: Editor): void {
+  if (editor.isDestroyed) return
+  const { view } = editor
+  const selection = view.dom.ownerDocument.getSelection()
+  const { anchorNode, focusNode } = selection ?? {}
+  if (!selection || !anchorNode || !focusNode || !view.dom.contains(anchorNode) || !view.dom.contains(focusNode)) return
+  // A selected picture or a caret between blocks is the editor's own; only text carets are read.
+  if (!(view.state.selection instanceof TextSelection)) return
+  try {
+    const anchor = view.posAtDOM(anchorNode, selection.anchorOffset)
+    const head = view.posAtDOM(focusNode, selection.focusOffset)
+    const current = view.state.selection
+    if (current.anchor === anchor && current.head === head) return
+    const next = TextSelection.between(view.state.doc.resolve(anchor), view.state.doc.resolve(head))
+    view.dispatch(view.state.tr.setSelection(next).setMeta('addToHistory', false))
+  } catch {
+    // The page's caret is somewhere the editor does not map; keep the editor's own.
+  }
 }
 
 /** Import image files and insert them as image blocks, one after another, at `position` (or the selection). */

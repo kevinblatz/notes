@@ -308,6 +308,12 @@ export class NotesDb {
     return rows.map((r) => stripInternal(this.toNote(r)))
   }
 
+  /** The live note whose extra field `key` holds `value` (the oldest, should there be several). */
+  findLiveByExtra(key: string, value: string): Note | null {
+    const row = this.stmt(`SELECT * FROM notes WHERE deleted_at IS NULL AND json_valid(extra_json) AND json_extract(extra_json, '$.' || ?) = ? ORDER BY created_at LIMIT 1`).get(key, value) as NoteRow | undefined
+    return row ? stripInternal(this.toNote(row)) : null
+  }
+
   listTrash(): NoteRecord[] {
     const rows = this.stmt('SELECT * FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC').all() as unknown as NoteRow[]
     return rows.map((r) => this.toNote(r))
@@ -336,8 +342,11 @@ export class NotesDb {
     for (const attachmentId of collectAttachmentIds(doc)) insert.run(noteId, attachmentId)
   }
 
-  /** Insert a new note and place it on the board in one transaction. */
-  createNote(input: CreateNoteInput): CreateNoteResult {
+  /**
+   * Insert a new note and place it on the board in one transaction. `extra` is set only by the
+   * main process itself (the session log marks its date there); the window cannot set it.
+   */
+  createNote(input: CreateNoteInput, extra: Record<string, unknown> = {}): CreateNoteResult {
     if (!isValidId(input.id)) throw new Error('Invalid note ID.')
     const content = sanitizeDoc(input.content)
     const title = sanitizeTitle(input.title)
@@ -346,9 +355,9 @@ export class NotesDb {
       if (this.getNote(input.id)) throw new Error('A note with this ID already exists.')
       const now = this.now()
       this.stmt(
-        `INSERT INTO notes (id, kind, title, content_json, plain_text, captions_text, tags_json, created_at, updated_at, revision)
-         VALUES (?, 'note', ?, ?, ?, ?, ?, ?, ?, 1)`
-      ).run(input.id, title, JSON.stringify(content), extractPlainText(content), extractCaptions(content), JSON.stringify(tags), now, now)
+        `INSERT INTO notes (id, kind, title, content_json, plain_text, captions_text, tags_json, created_at, updated_at, revision, extra_json)
+         VALUES (?, 'note', ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+      ).run(input.id, title, JSON.stringify(content), extractPlainText(content), extractCaptions(content), JSON.stringify(tags), now, now, JSON.stringify(extra))
       this.linkAttachments(input.id, content)
       const layout = this.writeLayout(insertNote(this.getLayout([input.id]), input.id, input.placement, newRowId))
       return { note: stripInternal(this.getNote(input.id)!), layout }

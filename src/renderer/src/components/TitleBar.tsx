@@ -40,6 +40,7 @@ import {
   subscribeOpacity
 } from '../state/actions'
 import { useStore } from '../state/store'
+import { CandleChip } from './CandleChip'
 import { IconButton, MenuList, Popover, Switch, type MenuEntry } from './ui'
 
 /** The opacity the controls show: the value being adjusted, or else the stored one. */
@@ -294,6 +295,7 @@ export function TitleBar() {
     <header className="titlebar">
       <div className="titlebar-drag" onDoubleClick={() => void api.windowAction('toggle-maximize')} />
       <div className="titlebar-controls">
+        <CandleChip />
         <OpacityControl />
         <IconButton ref={gear} label="Menu" aria-haspopup="menu" aria-expanded={gearOpen} onClick={() => setGearOpen(!gearOpen)} data-testid="gear">
           <Settings size={16} />

@@ -3,9 +3,11 @@
  * the operations the app performs. No Electron imports, so it runs unchanged under the
  * unit tests and could later back a different shell.
  */
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { countImages, noteLabel, truncate } from '@shared/content'
-import { loadPreferences, mergePreferences } from '@shared/preferences'
+import { countImages, emptyDoc, noteLabel, truncate } from '@shared/content'
+import { loadPreferences, mergePreferences, rememberSeeThrough } from '@shared/preferences'
+import { localDateKey, SESSION_LOG_FIELD, sessionLogTitle } from '@shared/sessionLog'
 import type {
   AttachmentMeta,
   BoardLayout,
@@ -17,6 +19,7 @@ import type {
   RestoreResult,
   SaveNoteInput,
   SaveNoteResult,
+  SessionLogResult,
   TrashEntry
 } from '@shared/types'
 import type { SavedWindowState } from '@shared/windowBounds'
@@ -67,6 +70,23 @@ export class Library {
 
   saveNote(input: SaveNoteInput): SaveNoteResult {
     return this.db.saveNote(input)
+  }
+
+  /**
+   * Today's session log: the live note marked with the local date of `at`, created at the top
+   * of the board on first use of the day (and again if that day's log was moved to Trash).
+   */
+  ensureSessionLog(at: number, locale?: string): SessionLogResult {
+    const key = localDateKey(at)
+    return this.db.transaction(() => {
+      const existing = this.db.findLiveByExtra(SESSION_LOG_FIELD, key)
+      if (existing) return { note: existing, layout: this.db.getLayout(), created: false }
+      const created = this.db.createNote(
+        { id: randomUUID(), title: sessionLogTitle(at, locale), content: emptyDoc(), tags: [], placement: { kind: 'row', index: 0 } },
+        { [SESSION_LOG_FIELD]: key }
+      )
+      return { ...created, created: true }
+    })
   }
 
   discardEmptyNote(id: string): LayoutResult & { discarded: boolean } {
@@ -159,7 +179,7 @@ export class Library {
   }
 
   setPreferences(patch: unknown): Preferences {
-    const next = mergePreferences(this.getPreferences(), patch)
+    const next = rememberSeeThrough(mergePreferences(this.getPreferences(), patch))
     this.db.setSetting('preferences', next)
     return next
   }

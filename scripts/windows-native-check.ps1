@@ -11,6 +11,10 @@
     - the notes window stays above a maximized Chrome window
     - clicking the notes window does give it focus (it is not click-through)
     - the global shortcut hides and shows the same single window
+    - the trading hotkeys: Ctrl+Alt+N (quick note) takes the keyboard only while typing and then
+      gives it back to the chart, or hides the notes again when they were hidden; Ctrl+Alt+R
+      (risk calculator) copies the contract count and gives the keyboard back the same way;
+      Ctrl+Alt+S (snapshot) never takes the keyboard from the chart
     - clicking the tray icon hides and shows it (reported for information; locating the
       icon depends on the Windows version)
     - launching the app a second time does not create a second window
@@ -114,7 +118,7 @@ function Click([int]$x, [int]$y) {
   [Native]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40
   [Native]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 350
 }
-$VK = @{ ctrl = 0x11; shift = 0x10; alt = 0x12; win = 0x5B; space = 0x20; f4 = 0x73; f11 = 0x7A }
+$VK = @{ ctrl = 0x11; shift = 0x10; alt = 0x12; win = 0x5B; space = 0x20; f4 = 0x73; f11 = 0x7A; enter = 0x0D; esc = 0x1B; tab = 0x09 }
 function Chord([string]$combo) {
   $keys = $combo.ToLower().Split("+") | ForEach-Object { if ($VK.ContainsKey($_)) { [byte]$VK[$_] } else { [byte][char]$_.ToUpper() } }
   foreach ($key in $keys) { [Native]::keybd_event($key, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 30 }
@@ -206,6 +210,10 @@ try {
     Check "Tray icon was created" ([bool]$report.tray.created)
     Check "Tray icon image loaded from the packaged app" ([bool]$report.tray.iconLoaded)
     Check "Global shortcut registered with Windows" ([bool]$report.shortcut.registered) ("{0} {1}" -f $report.shortcut.accelerator, $report.shortcut.error)
+    if ($report.hotkeys) {
+      $missing = @($report.hotkeys.PSObject.Properties | Where-Object { -not $_.Value.registered } | ForEach-Object { "{0} {1} {2}" -f $_.Name, $_.Value.accelerator, $_.Value.error })
+      Check "Trading hotkeys registered with Windows" ($missing.Count -eq 0) ($missing -join "; ")
+    }
   }
 
   $rect = RectOf $notes
@@ -331,6 +339,67 @@ try {
     }
   } catch { Check "Tray icon click test" $false "$_" $false }
   if (-not [Native]::IsWindowVisible($notes)) { Chord $Shortcut; Start-Sleep -Milliseconds 800 }
+
+  # ---------------------------------------------------------------- trading hotkeys
+  # The notes take the keyboard only while a typing hotkey is open, then give it back. If the
+  # hand-back check fails with the taskbar in the foreground, WindowManager.giveKeyboardBack()
+  # is the one function to change (minimize() + showInactive() instead of blur()).
+  $cr = RectOf $chrome
+  $chartPoint = @(($cr.Left + 150), ($cr.Top + [int](($cr.Bottom - $cr.Top) / 2)))
+  Click $chartPoint[0] $chartPoint[1]
+  Check "Chart has the keyboard before the hotkeys" ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName)
+  Chord "ctrl+alt+n"
+  $took = WaitFor { if ([Native]::GetForegroundWindow() -eq $notes) { $true } } 4000
+  Check "Quick note (Ctrl+Alt+N) brings the keyboard to the notes" ([bool]$took)
+  Shot "10-quick-note-open"
+  TypeText "native quick note"
+  Chord "enter"
+  $back = WaitFor { if ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) { $true } } 4000
+  $fg = [Native]::GetForegroundWindow()
+  Check "Quick note gives the keyboard back to the chart" ([bool]$back) ("foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
+  Check "Notes stay visible and on top after a quick note" ([Native]::IsWindowVisible($notes) -and (IsTopmost $notes))
+  Shot "11-quick-note-done"
+
+  # From hidden notes: they show for the quick note and hide again afterwards.
+  Chord $Shortcut
+  [void](WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000)
+  Click $chartPoint[0] $chartPoint[1]
+  Chord "ctrl+alt+n"
+  $shownForNote = WaitFor { if ([Native]::IsWindowVisible($notes) -and [Native]::GetForegroundWindow() -eq $notes) { $true } } 4000
+  Check "Quick note shows hidden notes with the keyboard" ([bool]$shownForNote)
+  TypeText "from hidden"
+  Chord "enter"
+  $rehidden = WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000
+  Check "Quick note hides the notes again when they were hidden" ([bool]$rehidden)
+  Check "The chart has the keyboard after the hidden quick note" ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) ("foreground: '" + (Title ([Native]::GetForegroundWindow())) + "'")
+  Chord $Shortcut
+  [void](WaitFor { if ([Native]::IsWindowVisible($notes)) { $true } } 4000)
+  Click $chartPoint[0] $chartPoint[1]
+
+  # Risk calculator: $100 with an 8-point stop on MES is 2 contracts ($40 each).
+  Set-Clipboard -Value "before"
+  Chord "ctrl+alt+r"
+  [void](WaitFor { if ([Native]::GetForegroundWindow() -eq $notes) { $true } } 4000)
+  TypeText "100"
+  Chord "tab"
+  TypeText "8"
+  Shot "12-risk-calculator"
+  Chord "enter"
+  $copied = WaitFor { if ((Get-Clipboard) -eq "2") { $true } } 4000
+  Check "Risk calculator (Ctrl+Alt+R) copies the contract count" ([bool]$copied) ("clipboard: '" + (Get-Clipboard) + "'")
+  $riskBack = WaitFor { if ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) { $true } } 4000
+  Check "Risk calculator gives the keyboard back to the chart" ([bool]$riskBack) ("foreground: '" + (Title ([Native]::GetForegroundWindow())) + "'")
+
+  # Snapshot: captured without the notes ever taking the keyboard.
+  $stolen = $false
+  Chord "ctrl+alt+s"
+  for ($i = 0; $i -lt 15; $i++) { if ([Native]::GetForegroundWindow() -eq $notes) { $stolen = $true }; Start-Sleep -Milliseconds 100 }
+  Check "Snapshot (Ctrl+Alt+S) leaves the keyboard with the chart" ((-not $stolen) -and ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName))
+  Shot "13-after-snapshot"
+  # See-through on and off again, also without taking the keyboard.
+  Chord "ctrl+alt+o"; Start-Sleep -Milliseconds 400; Chord "ctrl+alt+o"
+  Check "See-through (Ctrl+Alt+O) leaves the keyboard with the chart" ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName)
+  Check "Still exactly one notes window after the hotkeys" ((FindWindows "^Trading Notes$" $appName).Count -eq 1)
 
   # ---------------------------------------------------------------- second launch, close button
   $second = Start-Process -FilePath $AppExe -PassThru

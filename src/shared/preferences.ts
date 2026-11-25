@@ -1,5 +1,8 @@
 import { isValidAccelerator } from './accelerator'
+import { isCandleMinutes } from './candles'
 import { FONT_KEYS, MAX_FONT_SIZE, MIN_FONT_SIZE } from './content'
+import { mergeHotkeys } from './hotkeys'
+import { INSTRUMENT_KEYS, MAX_RISK_CENTS } from './risk'
 import { DEFAULT_PREFERENCES, type FontKey, type Preferences, type ReducedMotion, type ThemeKey } from './types'
 
 export const THEMES: readonly ThemeKey[] = ['charcoal', 'midnight', 'paper']
@@ -132,6 +135,29 @@ export function opacityWheelSteps(deltaY: number, carry: number): { steps: numbe
   return { steps: -Math.sign(total), carry: 0 }
 }
 
+/**
+ * The see-through hotkey: from solid to the see-through value last chosen, and from any
+ * see-through value back to solid.
+ */
+export function seeThroughToggleTarget(current: number, seeThrough: number): number {
+  if (clampOpacity(current) < 1) return 1
+  const remembered = clampOpacity(seeThrough)
+  return remembered < 1 ? remembered : DEFAULT_SEE_THROUGH
+}
+
+/** Used by the see-through hotkey until a see-through value has been chosen. */
+export const DEFAULT_SEE_THROUGH = 0.7
+
+/**
+ * Preferences as stored after an update: a see-through opacity that is set (from the title
+ * bar, Settings, the tray or the hotkey) is also remembered as the one the see-through hotkey
+ * goes back to.
+ */
+export function rememberSeeThrough(next: Preferences): Preferences {
+  const opacity = clampOpacity(next.windowOpacity)
+  return opacity < 1 && opacity !== next.seeThroughOpacity ? { ...next, seeThroughOpacity: opacity } : next
+}
+
 /** The tray menu's choices: the presets, plus the current value when it is not one of them. */
 export function opacityMenuChoices(current: number): number[] {
   const value = clampOpacity(current)
@@ -161,6 +187,18 @@ export function mergePreferences(base: Preferences, patch: unknown): Preferences
   if (typeof p.windowOpacity === 'number' && Number.isFinite(p.windowOpacity)) next.windowOpacity = clampOpacity(p.windowOpacity)
   if (typeof p.opacitySolidOnHover === 'boolean') next.opacitySolidOnHover = p.opacitySolidOnHover
   if (typeof p.formatBarCollapsed === 'boolean') next.formatBarCollapsed = p.formatBarCollapsed
+  if (typeof p.shortcutEnabled === 'boolean') next.shortcutEnabled = p.shortcutEnabled
+  if (p.hotkeys !== undefined) next.hotkeys = mergeHotkeys(base.hotkeys, p.hotkeys)
+  if (typeof p.seeThroughOpacity === 'number' && Number.isFinite(p.seeThroughOpacity) && clampOpacity(p.seeThroughOpacity) < 1) {
+    next.seeThroughOpacity = clampOpacity(p.seeThroughOpacity)
+  }
+  if (typeof p.candleTimer === 'boolean') next.candleTimer = p.candleTimer
+  if (isCandleMinutes(p.candleMinutes)) next.candleMinutes = p.candleMinutes
+  if (typeof p.candleChime === 'boolean') next.candleChime = p.candleChime
+  if (typeof p.riskInstrument === 'string' && (INSTRUMENT_KEYS as readonly string[]).includes(p.riskInstrument)) next.riskInstrument = p.riskInstrument as Preferences['riskInstrument']
+  if (p.riskCents === null) next.riskCents = null
+  else if (typeof p.riskCents === 'number' && Number.isSafeInteger(p.riskCents) && p.riskCents > 0 && p.riskCents <= MAX_RISK_CENTS) next.riskCents = p.riskCents
+  if (p.riskUnit === 'points' || p.riskUnit === 'ticks') next.riskUnit = p.riskUnit
   return next
 }
 

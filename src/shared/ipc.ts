@@ -14,6 +14,12 @@ export const IPC = {
   setPreferences: 'tn:prefs:set',
   setShortcut: 'tn:shortcut:set',
   suspendShortcut: 'tn:shortcut:suspend',
+  setHotkey: 'tn:hotkey:set',
+  setHotkeyEnabled: 'tn:hotkey:enable',
+  /** window -> main, no reply: quick note or the risk calculator is done; give the keyboard back. */
+  endTyping: 'tn:hotkey:end-typing',
+  ensureSessionLog: 'tn:session-log:ensure',
+  copyContracts: 'tn:risk:copy',
   windowAction: 'tn:window:action',
   setSession: 'tn:session:set',
   exportBackup: 'tn:backup:export',

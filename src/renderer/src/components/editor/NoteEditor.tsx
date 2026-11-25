@@ -14,11 +14,11 @@ import { api } from '../../lib/api'
 import { overlayDepth, useEscape } from '../../lib/escape'
 import { ACCEPT_ATTRIBUTE, hasFiles, imageFilesFrom } from '../../lib/images'
 import { sanitizePastedHtml } from '../../lib/pasteSanitizer'
-import { noteSaved, noteSaveState, returnToBoard, setActiveSaver, toast } from '../../state/actions'
+import { noteSaved, noteSaveState, returnToBoard, setActiveEditor, setActiveSaver, toast, type EditorHandle } from '../../state/actions'
 import { NoteSaver, type SaveState } from '../../state/saver'
 import { getState, useStore, type View } from '../../state/store'
 import { MenuList, Popover } from '../ui'
-import { buildExtensions, insertImageFiles, positionFromHint } from './extensions'
+import { appendLogEntries, buildExtensions, insertImageFiles, positionFromHint, syncSelectionFromPage } from './extensions'
 import { FormatBar, SelectionBubble } from './FormatBar'
 
 type NoteView = Extract<View, { mode: 'note' }>
@@ -203,6 +203,30 @@ export function NoteEditor({ view }: { view: NoteView }) {
     return () => {
       saver.dispose()
       saverRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, view.noteId])
+
+  // What the session log needs from the editor while this note is open: entries added
+  // through the editor, so it and its saver stay the source of truth for this note.
+  useEffect(() => {
+    const handle: EditorHandle = {
+      noteId: view.noteId,
+      openedAt: initial?.revision ?? 0,
+      appendBlocks: (blocks) => appendLogEntries(editor, blocks),
+      captureSelection: () => syncSelectionFromPage(editor),
+      restoreFocus: () => {
+        if (!editor.isDestroyed) editor.view.focus()
+      },
+      focusEnd: () => {
+        if (editor.isDestroyed) return
+        editor.commands.focus('end', { scrollIntoView: true })
+        editor.view.focus()
+      }
+    }
+    setActiveEditor(handle)
+    return () => {
+      setActiveEditor(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, view.noteId])
