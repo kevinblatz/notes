@@ -21,36 +21,33 @@ describe('window handles from Electron buffers', () => {
 
 describe('where the keyboard may go back to', () => {
   it('accepts an app window the user can see', () => {
-    expect(isReturnTarget(info(), OWN)).toBe(true)
+    expect(isReturnTarget(info())).toBe(true)
     // The desktop, if that is where the user was.
-    expect(isReturnTarget(info({ className: 'Progman', pid: 7000 }), OWN)).toBe(true)
+    expect(isReturnTarget(info({ className: 'Progman', pid: 7000 }))).toBe(true)
   })
   it('never the taskbar, the tray or its flyouts', () => {
     for (const className of ['Shell_TrayWnd', 'Shell_SecondaryTrayWnd', 'NotifyIconOverflowWindow', 'TopLevelWindowForOverflowXamlIsland', 'XamlExplorerHostIslandWindow']) {
-      expect(isReturnTarget(info({ className, pid: 7000 }), OWN)).toBe(false)
+      expect(isReturnTarget(info({ className, pid: 7000 }))).toBe(false)
     }
   })
-  it('never this app’s own windows (the tray menu, the notes)', () => {
-    expect(isReturnTarget(info({ pid: OWN }), OWN)).toBe(false)
-  })
   it('never a window that cannot be seen or is gone', () => {
-    expect(isReturnTarget(null, OWN)).toBe(false)
-    expect(isReturnTarget(info({ visible: false }), OWN)).toBe(false)
-    expect(isReturnTarget(info({ minimized: true }), OWN)).toBe(false)
-    expect(isReturnTarget(info({ cloaked: true }), OWN)).toBe(false)
-    expect(isReturnTarget(info({ pid: 0 }), OWN)).toBe(false)
+    expect(isReturnTarget(null)).toBe(false)
+    expect(isReturnTarget(info({ visible: false }))).toBe(false)
+    expect(isReturnTarget(info({ minimized: true }))).toBe(false)
+    expect(isReturnTarget(info({ cloaked: true }))).toBe(false)
+    expect(isReturnTarget(info({ pid: 0 }))).toBe(false)
   })
 })
 
 describe('the app used last', () => {
   it('is an ordinary app window: not always-on-top, not a tool window, not the desktop', () => {
-    expect(isOrdinaryAppWindow(info(), OWN)).toBe(true)
-    expect(isOrdinaryAppWindow(info({ exStyle: 0x8 }), OWN)).toBe(false)
-    expect(isOrdinaryAppWindow(info({ exStyle: 0x80 }), OWN)).toBe(false)
+    expect(isOrdinaryAppWindow(info())).toBe(true)
+    expect(isOrdinaryAppWindow(info({ exStyle: 0x8 }))).toBe(false)
+    expect(isOrdinaryAppWindow(info({ exStyle: 0x80 }))).toBe(false)
     // A tool window that asks to be on the taskbar counts.
-    expect(isOrdinaryAppWindow(info({ exStyle: 0x80 | 0x40000 }), OWN)).toBe(true)
-    expect(isOrdinaryAppWindow(info({ className: 'Progman' }), OWN)).toBe(false)
-    expect(isOrdinaryAppWindow(info({ className: 'Shell_TrayWnd' }), OWN)).toBe(false)
+    expect(isOrdinaryAppWindow(info({ exStyle: 0x80 | 0x40000 }))).toBe(true)
+    expect(isOrdinaryAppWindow(info({ className: 'Progman' }))).toBe(false)
+    expect(isOrdinaryAppWindow(info({ className: 'Shell_TrayWnd' }))).toBe(false)
   })
   it('is the first one from the top of the z-order, past the notes, the taskbar and hidden windows', () => {
     const windows = new Map<number, WindowInfo>([
@@ -67,10 +64,13 @@ describe('the app used last', () => {
       topDown: () => windows.keys(),
       activate: () => true
     }
-    expect(appUsedLast(api, OWN)).toBe(5)
+    expect(appUsedLast(api, 1)).toBe(5)
+    // With always-on-top switched off the notes are an ordinary window, and still skipped.
+    windows.set(1, info({ pid: OWN }))
+    expect(appUsedLast(api, 1)).toBe(5)
     windows.delete(5)
     windows.delete(6)
-    expect(appUsedLast(api, OWN)).toBe(0)
+    expect(appUsedLast(api, 1)).toBe(0)
   })
 })
 
@@ -83,7 +83,7 @@ describe('user32 access', () => {
       expect(typeof current).toBe('number')
       expect(api.describe(0)).toBeNull()
       if (current !== 0) expect(typeof api.describe(current)?.className).toBe('string')
-      expect(typeof appUsedLast(api, process.pid)).toBe('number')
+      expect(typeof appUsedLast(api, 0)).toBe('number')
     } else {
       expect(foregroundApi()).toBeNull()
       expect(foregroundStatus()).toEqual({ available: false, error: null })

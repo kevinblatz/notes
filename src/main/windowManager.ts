@@ -525,10 +525,13 @@ export class WindowManager {
     let how: KeyboardRelease | null = null
     const api = foregroundApi()
     if (api) {
-      if (target !== null && isReturnTarget(api.describe(target), process.pid) && api.activate(target)) how = 'returned'
+      const own = handleFromBuffer(win.getNativeWindowHandle())
+      // Counted only once Windows has really moved the keyboard away from the notes.
+      const handTo = (hwnd: WindowHandle): boolean => api.activate(hwnd) && api.current() !== own
+      if (target !== null && target !== own && isReturnTarget(api.describe(target)) && handTo(target)) how = 'returned'
       else {
-        const below = appUsedLast(api, process.pid)
-        if (below !== 0 && api.activate(below)) how = 'returned-below'
+        const below = appUsedLast(api, own)
+        if (below !== 0 && handTo(below)) how = 'returned-below'
       }
     }
     if (how === null) {
@@ -547,9 +550,9 @@ export class WindowManager {
   }
 
   /**
-   * Hiding while the taskbar, the tray or one of this app's own windows (the tray menu) has
-   * the keyboard: pass it on to the app used last, where Windows allows it, rather than leave
-   * it with the taskbar or with a window that is about to disappear.
+   * Hiding while the taskbar, the tray or one of this app's own hidden windows (the tray menu)
+   * has the keyboard: pass it on to the app used last, where Windows allows it, rather than
+   * leave it with the taskbar or with a window that is about to disappear.
    */
   private passKeyboardOnFromShell(): void {
     const api = foregroundApi()
@@ -559,8 +562,9 @@ export class WindowManager {
     const info = api.describe(current)
     if (!info) return
     const own = handleFromBuffer(win.getNativeWindowHandle())
-    if (current === own || !(info.pid === process.pid || SHELL_CLASSES.has(info.className))) return
-    const below = appUsedLast(api, process.pid)
+    const ownHidden = info.pid === process.pid && !info.visible
+    if (current === own || !(ownHidden || SHELL_CLASSES.has(info.className))) return
+    const below = appUsedLast(api, own)
     if (below !== 0 && api.activate(below)) this.record('returned-below')
   }
 
@@ -576,9 +580,10 @@ export class WindowManager {
     const api = foregroundApi()
     if (!api) return
     const current = api.current()
-    // The taskbar (a tray click, a pinned-icon launch) or one of this app's own windows is not
-    // where typing goes back to; the app used last is found when the time comes.
-    this.returnTo = current !== 0 && isReturnTarget(api.describe(current), process.pid) ? current : null
+    const own = handleFromBuffer(win.getNativeWindowHandle())
+    // The taskbar (a tray click, a pinned-icon launch) is not where typing goes back to; the
+    // app used last is found when the time comes.
+    this.returnTo = current !== 0 && current !== own && isReturnTarget(api.describe(current)) ? current : null
   }
 
   /** The notes window when it is visible and docked to a half of a display (snapshots cut it away). */

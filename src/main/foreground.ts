@@ -65,24 +65,24 @@ const WS_EX_TOPMOST = 0x8
 const WS_EX_TOOLWINDOW = 0x80
 const WS_EX_APPWINDOW = 0x40000
 
-/** A window the keyboard may go back to: one that can be seen, outside this app and the shell. */
-export function isReturnTarget(info: WindowInfo | null, ownPid: number): info is WindowInfo {
-  return !!info && info.visible && !info.minimized && !info.cloaked && info.pid !== 0 && info.pid !== ownPid && !SHELL_CLASSES.has(info.className)
+/** A window the keyboard may go back to: one that can be seen, and not the taskbar or the shell. */
+export function isReturnTarget(info: WindowInfo | null): info is WindowInfo {
+  return !!info && info.visible && !info.minimized && !info.cloaked && info.pid !== 0 && !SHELL_CLASSES.has(info.className)
 }
 
 /** An ordinary app window (not always-on-top, not a tool window, not the desktop): what Alt+Tab would offer. */
-export function isOrdinaryAppWindow(info: WindowInfo | null, ownPid: number): info is WindowInfo {
-  if (!isReturnTarget(info, ownPid)) return false
+export function isOrdinaryAppWindow(info: WindowInfo | null): info is WindowInfo {
+  if (!isReturnTarget(info)) return false
   const tool = (info.exStyle & WS_EX_TOOLWINDOW) !== 0 && (info.exStyle & WS_EX_APPWINDOW) === 0
   return (info.exStyle & WS_EX_TOPMOST) === 0 && !tool && !DESKTOP_CLASSES.has(info.className)
 }
 
-/** The app used last: the top ordinary app window in the z-order. 0 when there is none. */
-export function appUsedLast(api: ForegroundApi, ownPid: number): WindowHandle {
+/** The app used last: the top ordinary app window in the z-order, other than the notes. 0 when there is none. */
+export function appUsedLast(api: ForegroundApi, notes: WindowHandle): WindowHandle {
   let seen = 0
   for (const hwnd of api.topDown()) {
     if (++seen > 4096) break
-    if (isOrdinaryAppWindow(api.describe(hwnd), ownPid)) return hwnd
+    if (hwnd !== notes && isOrdinaryAppWindow(api.describe(hwnd))) return hwnd
   }
   return 0
 }
