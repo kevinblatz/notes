@@ -1,18 +1,42 @@
 /**
- * A one-line text field with the app's own spelling underlines (the note title, the quick note
- * strip, image captions, the tag field). A field cannot draw decorations inside itself, so a
- * transparent copy of its text lies exactly over it, with the misspelled words underlined; it is
- * laid out from the field's own computed style (again whenever the font or text size changes)
- * and follows it when it scrolls sideways. Right-click (or the menu key) opens the Edit menu,
- * with the suggestions for a misspelled word first.
+ * Text fields with the app's own spelling underlines: SpellInput for one-line fields (the quick
+ * note strip, the tag field) and SpellTextArea for text that wraps onto as many lines as it
+ * needs (the note title and image captions, which must stay readable in a narrow window).
+ *
+ * A field cannot draw decorations inside itself, so a transparent copy of its text lies exactly
+ * over it, with the misspelled words underlined; it is laid out from the field's own computed
+ * style (again whenever the font or text size changes) and follows it when it scrolls. The copy
+ * of a wrapping field wraps exactly as the field does, so every line's underlines stay under
+ * their words. Right-click (or the menu key) opens the Edit menu, with the suggestions for a
+ * misspelled word first.
  */
-import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type InputHTMLAttributes, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEventHandler,
+  type FocusEventHandler,
+  type ForwardedRef,
+  type InputHTMLAttributes,
+  type KeyboardEventHandler,
+  type MouseEvent as ReactMouseEvent,
+  type ReactEventHandler,
+  type ReactNode,
+  type TextareaHTMLAttributes,
+  type UIEventHandler
+} from 'react'
 import { createPortal } from 'react-dom'
 import { findMisses } from '@shared/spelling'
 import { useSpeller } from '../lib/spelling'
 import { useStore } from '../state/store'
 import { editEntries, openedFromKeyboard, spellingEntries } from './editMenu'
 import { MenuList, Popover } from './ui'
+
+type FieldElement = HTMLInputElement | HTMLTextAreaElement
 
 interface FieldMenu {
   x: number
@@ -24,31 +48,75 @@ interface FieldMenu {
 }
 
 /** Set a field's text as if typed, so its owner's onChange runs. */
-function typeInto(field: HTMLInputElement, value: string): void {
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, value)
+function typeInto(field: FieldElement, value: string): void {
+  const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(field, value)
   field.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
-interface SpellInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'value'> {
+interface Common {
   value: string
   /** Class of the wrapper that takes the field's place in the layout. */
   fieldClassName?: string
 }
+type SpellInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'value'> & Common
+type SpellTextAreaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'rows'> & Common
 
 /** Style properties that decide where each character of a field's text is drawn. */
 const COPIED = [
-  'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontStretch', 'fontVariant', 'fontFeatureSettings', 'fontVariationSettings',
-  'letterSpacing', 'wordSpacing', 'textTransform', 'textIndent', 'textAlign', 'lineHeight', 'boxSizing',
+  'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontStretch', 'fontVariant', 'fontFeatureSettings', 'fontVariationSettings', 'fontKerning',
+  'letterSpacing', 'wordSpacing', 'textTransform', 'textIndent', 'textAlign', 'textRendering', 'lineHeight', 'boxSizing', 'tabSize',
   'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
   'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'
 ] as const
+/** ... and, for a field that wraps, where its lines break. */
+const COPIED_WRAPPING = ['whiteSpace', 'overflowWrap', 'wordBreak', 'lineBreak', 'hyphens'] as const
 
-export const SpellInput = forwardRef<HTMLInputElement, SpellInputProps>(function SpellInput({ value, fieldClassName, onChange, onBlur, onSelect, onKeyUp, onScroll, ...rest }, forwarded) {
+/**
+ * How far below a word's box (its font's descent) the wave of a field's underline is drawn, so
+ * it sits where a wavy text decoration 0.2em under the baseline would (see spelling.css). Found
+ * once per font by measuring where the baseline falls in a word's box.
+ */
+const waveDrops = new Map<string, number>()
+document.fonts?.addEventListener('loadingdone', () => waveDrops.clear())
+const FONT_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontStretch', 'fontVariationSettings', 'fontFeatureSettings'] as const
+function waveDrop(style: CSSStyleDeclaration): number {
+  const key = FONT_KEYS.map((name) => style[name]).join('|')
+  let drop = waveDrops.get(key)
+  if (drop === undefined) {
+    const probe = document.createElement('div')
+    probe.style.cssText = 'position:absolute;left:-10000px;top:0;visibility:hidden;white-space:nowrap;line-height:normal'
+    for (const name of FONT_KEYS) probe.style[name] = style[name]
+    const word = document.createElement('span')
+    word.textContent = 'x'
+    // An empty inline block sits on the baseline.
+    const baseline = document.createElement('span')
+    baseline.style.cssText = 'display:inline-block;width:0;height:0'
+    probe.append(word, baseline)
+    document.body.append(probe)
+    const descent = word.getBoundingClientRect().bottom - baseline.getBoundingClientRect().bottom
+    probe.remove()
+    drop = Math.max(0, Math.round((parseFloat(style.fontSize) * 0.2 + 3 - descent) * 10) / 10)
+    waveDrops.set(key, drop)
+  }
+  return drop
+}
+
+interface Handlers<E extends FieldElement> {
+  onChange?: ChangeEventHandler<E>
+  onBlur?: FocusEventHandler<E>
+  onSelect?: ReactEventHandler<E>
+  onKeyUp?: KeyboardEventHandler<E>
+  onScroll?: UIEventHandler<E>
+}
+
+/** Everything a spell-checked field needs: its ref, the handlers to put on it, and the underlines and menu to render beside it. */
+function useSpellField<E extends FieldElement>(value: string, forwarded: ForwardedRef<E>, own: Handlers<E>, wraps: boolean) {
   const speller = useSpeller()
   const enabled = useStore((s) => s.prefs.spellcheck)
   const fontFamily = useStore((s) => s.prefs.fontFamily)
   const fontSize = useStore((s) => s.prefs.fontSize)
-  const input = useRef<HTMLInputElement | null>(null)
+  const input = useRef<E | null>(null)
   const mirror = useRef<HTMLSpanElement>(null)
   const track = useRef<HTMLSpanElement>(null)
   const menuAnchor = useRef<HTMLSpanElement>(null)
@@ -57,7 +125,7 @@ export const SpellInput = forwardRef<HTMLInputElement, SpellInputProps>(function
   const [menu, setMenu] = useState<FieldMenu | null>(null)
 
   const setRef = useCallback(
-    (element: HTMLInputElement | null) => {
+    (element: E | null) => {
       input.current = element
       if (typeof forwarded === 'function') forwarded(element)
       else if (forwarded) forwarded.current = element
@@ -68,20 +136,25 @@ export const SpellInput = forwardRef<HTMLInputElement, SpellInputProps>(function
   const misses = useMemo(() => (enabled && speller.ready ? findMisses(value, speller) : []), [value, speller, enabled])
   const shown = typedAt === null ? misses : misses.filter((miss) => !(miss.from <= typedAt && typedAt <= miss.to))
 
-  // Lay the copy over the field: same box, same font, same scroll.
+  // Lay the copy over the field: same box, same font, same line breaks, same scroll.
   const place = useCallback(() => {
     const field = input.current
     const copy = mirror.current
     if (!field || !copy) return
     const style = getComputedStyle(field)
     for (const key of COPIED) copy.style[key] = style[key]
+    if (wraps) for (const key of COPIED_WRAPPING) copy.style[key] = style[key]
     copy.style.borderStyle = 'solid'
+    copy.style.setProperty('--spell-drop', `${waveDrop(style)}px`)
     copy.style.left = `${field.offsetLeft}px`
     copy.style.top = `${field.offsetTop}px`
     copy.style.width = `${field.offsetWidth}px`
     copy.style.height = `${field.offsetHeight}px`
-    if (track.current) track.current.style.transform = field.scrollLeft ? `translateX(${-field.scrollLeft}px)` : ''
-  }, [])
+    if (track.current) {
+      const shift = wraps ? (field.scrollTop ? `translateY(${-field.scrollTop}px)` : '') : field.scrollLeft ? `translateX(${-field.scrollLeft}px)` : ''
+      track.current.style.transform = shift
+    }
+  }, [wraps])
 
   const hasMirror = shown.length > 0
   useLayoutEffect(() => {
@@ -89,6 +162,7 @@ export const SpellInput = forwardRef<HTMLInputElement, SpellInputProps>(function
     place()
     const field = input.current
     if (!field) return
+    // A wrapping field grows and shrinks with its text and with the window's width.
     const observer = new ResizeObserver(place)
     observer.observe(field)
     return () => observer.disconnect()
@@ -105,7 +179,7 @@ export const SpellInput = forwardRef<HTMLInputElement, SpellInputProps>(function
     }
   }, [hasMirror, place, fontFamily, fontSize])
 
-  const openMenu = (event: ReactMouseEvent<HTMLInputElement>): void => {
+  const openMenu = (event: ReactMouseEvent<E>): void => {
     event.preventDefault()
     event.stopPropagation()
     const field = event.currentTarget
@@ -143,7 +217,7 @@ export const SpellInput = forwardRef<HTMLInputElement, SpellInputProps>(function
     place()
   }
 
-  const segments: React.ReactNode[] = []
+  const segments: ReactNode[] = []
   let cursor = 0
   for (const miss of shown) {
     if (miss.from > cursor) segments.push(value.slice(cursor, miss.from))
@@ -156,35 +230,33 @@ export const SpellInput = forwardRef<HTMLInputElement, SpellInputProps>(function
   }
   if (cursor < value.length) segments.push(value.slice(cursor))
 
-  return (
-    <span className={`spell-field${fieldClassName ? ` ${fieldClassName}` : ''}`}>
-      <input
-        ref={setRef}
-        value={value}
-        spellCheck={false}
-        {...rest}
-        onChange={(event) => {
-          setTypedAt(event.target.selectionStart)
-          onChange?.(event)
-        }}
-        onBlur={(event) => {
-          setTypedAt(null)
-          onBlur?.(event)
-        }}
-        onSelect={(event) => {
-          caretMoved()
-          onSelect?.(event)
-        }}
-        onKeyUp={(event) => {
-          caretMoved()
-          onKeyUp?.(event)
-        }}
-        onScroll={(event) => {
-          place()
-          onScroll?.(event)
-        }}
-        onContextMenu={openMenu}
-      />
+  const fieldProps = {
+    spellCheck: false,
+    onChange: (event: Parameters<ChangeEventHandler<E>>[0]) => {
+      setTypedAt(event.target.selectionStart)
+      own.onChange?.(event)
+    },
+    onBlur: (event: Parameters<FocusEventHandler<E>>[0]) => {
+      setTypedAt(null)
+      own.onBlur?.(event)
+    },
+    onSelect: (event: Parameters<ReactEventHandler<E>>[0]) => {
+      caretMoved()
+      own.onSelect?.(event)
+    },
+    onKeyUp: (event: Parameters<KeyboardEventHandler<E>>[0]) => {
+      caretMoved()
+      own.onKeyUp?.(event)
+    },
+    onScroll: (event: Parameters<UIEventHandler<E>>[0]) => {
+      place()
+      own.onScroll?.(event)
+    },
+    onContextMenu: openMenu
+  }
+
+  const overlay = (
+    <>
       {hasMirror ? (
         <span ref={mirror} className="spell-mirror" aria-hidden="true">
           <span ref={track} className="spell-mirror-text">
@@ -202,17 +274,95 @@ export const SpellInput = forwardRef<HTMLInputElement, SpellInputProps>(function
           />
         ) : null}
       </Popover>
+    </>
+  )
+
+  return { setRef, fieldProps, overlay, input }
+}
+
+/** A one-line text field with spelling underlines. */
+export const SpellInput = forwardRef<HTMLInputElement, SpellInputProps>(function SpellInput({ value, fieldClassName, onChange, onBlur, onSelect, onKeyUp, onScroll, ...rest }, forwarded) {
+  const spell = useSpellField<HTMLInputElement>(value, forwarded, { onChange, onBlur, onSelect, onKeyUp, onScroll }, false)
+  return (
+    <span className={`spell-field${fieldClassName ? ` ${fieldClassName}` : ''}`}>
+      <input ref={spell.setRef} value={value} {...rest} {...spell.fieldProps} />
+      {spell.overlay}
     </span>
   )
 })
 
-/** The misspelled word of a SpellInput under a point on screen, from its underlines. */
+const LINE_BREAKS = /\r\n|\r|\n/g
+
+/**
+ * A field for a single line of text that wraps onto as many lines as it needs, growing with its
+ * text (no scroll bar, nothing cut off). It never holds a line break: Enter and Shift+Enter are
+ * left to the owner's onKeyDown, and pasted or dropped line breaks become spaces.
+ */
+export const SpellTextArea = forwardRef<HTMLTextAreaElement, SpellTextAreaProps>(function SpellTextArea({ value, fieldClassName, onChange, onBlur, onSelect, onKeyUp, onScroll, ...rest }, forwarded) {
+  const oneLine: ChangeEventHandler<HTMLTextAreaElement> = (event) => {
+    const field = event.target
+    if (/[\r\n]/.test(field.value)) {
+      const caret = field.value.slice(0, field.selectionStart ?? field.value.length).replace(LINE_BREAKS, ' ').length
+      field.value = field.value.replace(LINE_BREAKS, ' ')
+      field.setSelectionRange(caret, caret)
+    }
+    onChange?.(event)
+  }
+  const spell = useSpellField<HTMLTextAreaElement>(value, forwarded, { onChange: oneLine, onBlur, onSelect, onKeyUp, onScroll }, true)
+  // A line break is never typed in, whatever key or input method asks for one.
+  useEffect(() => {
+    const field = spell.input.current
+    if (!field) return
+    const refuse = (event: InputEvent): void => {
+      if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph') event.preventDefault()
+    }
+    field.addEventListener('beforeinput', refuse)
+    return () => field.removeEventListener('beforeinput', refuse)
+  }, [spell.input])
+  return (
+    <span className={`spell-field is-wrapping${fieldClassName ? ` ${fieldClassName}` : ''}`}>
+      <textarea ref={spell.setRef} value={value} rows={1} {...rest} {...spell.fieldProps} />
+      {spell.overlay}
+    </span>
+  )
+})
+
+/** The caret of a wrapping field is on its last line (as wrapped on screen): the next line down is outside the field. */
+export function caretOnLastLine(field: HTMLTextAreaElement): boolean {
+  const value = field.value
+  const caret = field.selectionEnd ?? value.length
+  if (caret >= value.length - 1) return true
+  const probe = document.createElement('div')
+  const style = getComputedStyle(field)
+  for (const key of [...COPIED, ...COPIED_WRAPPING]) probe.style[key] = style[key]
+  probe.style.borderStyle = 'solid'
+  probe.style.position = 'absolute'
+  probe.style.visibility = 'hidden'
+  probe.style.left = '-10000px'
+  probe.style.top = '0'
+  probe.style.width = `${field.offsetWidth}px`
+  // The line of the character after the caret (a caret where a line wraps shows at the start
+  // of the next line), against the line of the last character.
+  const at = document.createElement('span')
+  const end = document.createElement('span')
+  at.textContent = value.charAt(caret)
+  end.textContent = value.charAt(value.length - 1)
+  probe.append(value.slice(0, caret), at, value.slice(caret + 1, -1), end)
+  document.body.append(probe)
+  const last = at.offsetTop >= end.offsetTop
+  probe.remove()
+  return last
+}
+
+/** The misspelled word of a SpellInput or SpellTextArea under a point on screen, from its underlines. */
 export function inputMissAt(field: HTMLElement, x: number, y: number): { from: number; to: number; word: string } | null {
   const wrapper = field.closest('.spell-field')
   for (const span of Array.from(wrapper?.querySelectorAll<HTMLElement>('.spell-mirror .spell-miss') ?? [])) {
-    const box = span.getBoundingClientRect()
-    if (x >= box.left && x <= box.right && y >= box.top - 4 && y <= box.bottom + 4) {
-      return { from: Number(span.dataset.missFrom), to: Number(span.dataset.missTo), word: span.textContent ?? '' }
+    // A word may be split over two lines: each of its pieces counts.
+    for (const box of Array.from(span.getClientRects())) {
+      if (x >= box.left && x <= box.right && y >= box.top - 4 && y <= box.bottom + 4) {
+        return { from: Number(span.dataset.missFrom), to: Number(span.dataset.missTo), word: span.textContent ?? '' }
+      }
     }
   }
   return null

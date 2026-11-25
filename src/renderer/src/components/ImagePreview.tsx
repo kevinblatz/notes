@@ -49,7 +49,9 @@ export function ImagePreview() {
   return (
     <div className="preview-layer" ref={panel} role="dialog" aria-modal="true" aria-label="Image preview" data-overlay data-testid="image-preview">
       <div className="preview-bar">
-        <span className="preview-caption">{preview.caption}</span>
+        <span className="preview-caption" title={preview.caption || undefined}>
+          {preview.caption}
+        </span>
         <IconButton label="Zoom out" hint="-" disabled={zoom <= MIN_ZOOM} onClick={() => applyZoom(zoom / 1.4)}><Minus size={16} /></IconButton>
         <span className="preview-zoom" aria-live="polite">{Math.round(zoom * 100)}%</span>
         <IconButton label="Zoom in" hint="+" disabled={zoom >= MAX_ZOOM} onClick={() => applyZoom(zoom * 1.4)}><Plus size={16} /></IconButton>

@@ -306,6 +306,76 @@ describe('Fixing', () => {
   })
 })
 
+/**
+ * A real note from the user, typed in a hurry after a session ("umitigated" was in italics). The
+ * title is cut off in the screenshot it came from; the end of it here stands in for the rest.
+ */
+const REAL_TITLE = 'Wednesday 11/25 "Continuation Scalping to a planned level"'
+const REAL_ONE_BEFORE =
+  'Missed dump to NWOG taking shit, got back and took 4-5 trades in the hour of 845-930. All scalps. 10 contracts a pull. Hit a few lost a few, im understanding the market a little more on the micros, its just the god candles fuck me sometimes. Also unmiitigated 5 min fvg kept edging that it was gonna go touch it but price kept moving upward tpwards nothingness, i knew price would wanna sweep and mitigate that 5 min fvg, so instead of waiting for it to do that and wait for an entry, my entry IS the way down to that 5 min fvg '
+const REAL_ITALIC = 'umitigated'
+const REAL_ONE_AFTER = '. BIG HELP. Not the greatest feeling day but up 1400 pnl across 3 accounts. All evals so hopefully friday or next week can get these funded.'
+const REAL_TWO =
+  'Biggest headache today is missing that new week opening gap while shitting, i know my rule is not to trade first 15 min but granted the conditions of overnight dump.'
+const REAL_NOTE = doc(p(REAL_ONE_BEFORE, text(REAL_ITALIC, [{ type: 'italic' }]), REAL_ONE_AFTER), p(REAL_TWO), image('chart-1125'))
+
+describe('a real note', () => {
+  it('fixes exactly the slips and leaves the trader’s own words, both paragraphs, the italics and the chart as they were', () => {
+    const result = organize(REAL_NOTE, REAL_TITLE)
+    expect(result.doc).toEqual(
+      doc(
+        p(
+          "Missed dump to NWOG taking shit, got back and took 4-5 trades in the hour of 845-930. All scalps. 10 contracts a pull. Hit a few lost a few, I'm understanding the market a little more on the micros, it's just the god candles fuck me sometimes. Also unmitigated 5 min FVG kept edging that it was gonna go touch it but price kept moving upward towards nothingness, I knew price would wanna sweep and mitigate that 5 min FVG, so instead of waiting for it to do that and wait for an entry, my entry IS the way down to that 5 min FVG ",
+          text('unmitigated', [{ type: 'italic' }]),
+          '. BIG HELP. Not the greatest feeling day but up 1400 PnL across 3 accounts. All evals so hopefully Friday or next week can get these funded.'
+        ),
+        p('Biggest headache today is missing that new week opening gap while shitting, I know my rule is not to trade first 15 min but granted the conditions of overnight dump.'),
+        image('chart-1125')
+      )
+    )
+    expect(result.title).toBe(REAL_TITLE)
+    // im, its, unmiitigated, fvg x3, tpwards, i x2, umitigated, pnl, friday.
+    expect(result.wordsFixed).toBe(12)
+    expect(result.regrouped).toBe(0)
+    expect(organizeSummary(result)).toBe('Fixed 12 words')
+    // Organized once is organized.
+    expect(organize(result.doc, result.title).changed).toBe(false)
+  })
+
+  it('knows "new week opening gap" is the NWOG the first paragraph names', () => {
+    expect([...sharedKeys(REAL_TWO)]).toEqual(['nwog'])
+    expect([...sharedKeys('Missed dump to NWOG taking shit, got back and took 4-5 trades in the hour of 845-930.')]).toEqual(['nwog'])
+  })
+})
+
+describe('ICT terms written out', () => {
+  it('count as their codes, however they are written', () => {
+    const keys = (value: string): string[] => [...sharedKeys(value)].sort()
+    expect(keys('the new day opening gap and the new week opening gap')).toEqual(['ndog', 'nwog'])
+    expect(keys('price filled the Fair Value Gap, then the inversion fair value gap and an inverse FVG')).toEqual(['fvg', 'ifvg'])
+    expect(keys('a balanced price range at the optimal trade entry after the market structure shift')).toEqual(['bpr', 'mss', 'ote'])
+    expect(keys('took the previous day high, the prior day’s low and last week’s high')).toEqual(['pdh', 'pdl', 'pwh'])
+    expect(keys('buy side liquidity, sell-side liquidity and buyside liquidity')).toEqual(['bsl', 'ssl'])
+    expect(keys('the order block, a breaker block, equal highs and equal lows, the draw on liquidity')).toEqual(['bb', 'dol', 'eqh', 'eql', 'ob'])
+    expect(keys('a break of structure, a change of character, a change in the state of delivery')).toEqual(['bos', 'choch', 'cisd'])
+    // Whole words only, and nothing from words that only look alike.
+    expect(keys('unequal highs, a fair value gapping market, the opening gap')).toEqual([])
+  })
+
+  it('score like their codes, so a sentence about one is about the market', () => {
+    expect(classifyStatement('the new week opening gap held').topic).toBe('setup')
+    expect(classifyStatement('the buy side liquidity was taken').topic).toBe('setup')
+  })
+
+  it('link a stray’s return to the thought it left, whichever way the level is written', () => {
+    const left = 'Price ran into the NWOG at the open and swept the lows.'
+    const stray = 'Ugh my neighbor is drilling again.'
+    expect(regroupPlan([left, stray, 'The new week opening gap held as support and we bounced hard.'])?.moves).toEqual([{ stray: [1], returnsAt: 2, cued: false }])
+    // A different gap is not a return.
+    expect(regroupPlan([left, stray, 'The gap held as support and we bounced hard.'])).toBeNull()
+  })
+})
+
 describe('Regrouping', () => {
   it('knows what a sentence is about, and says so only when it is clear', () => {
     expect(classifyStatement('took long at 6104 stop 6096').topic).toBe('trades')

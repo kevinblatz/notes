@@ -301,6 +301,36 @@ describe('trader words', () => {
     )
     expect(corrected('a fvg and a mss')).toBe('a FVG and a MSS')
   })
+
+  it('writes "it\u2019s" for "its" only before words that cannot follow "its" as an owner', () => {
+    expect(corrected("its just the god candles. its very hard to wait. its all good. its ok, its over, its about time, its really not, its too much, its so slow")).toBe(
+      "it's just the god candles. it's very hard to wait. it's all good. it's ok, it's over, it's about time, it's really not, it's too much, it's so slow"
+    )
+    expect(corrected('its going to run, its gonna run, its the open, its an IFVG, its hard to sit, its crazy how fast, its done.')).toBe(
+      "it's going to run, it's gonna run, it's the open, it's an IFVG, it's hard to sit, it's crazy how fast, it's done."
+    )
+    // Where "its" owns what follows, it stays.
+    expect(corrected('its range, its high, its own range, its going rate, its all-time high, its all time high, its very own range, its very first candle')).toBe(
+      'its range, its high, its own range, its going rate, its all-time high, its all time high, its very own range, its very first candle'
+    )
+    expect(corrected('its hard edge, its wild swings, its crazy volatility, its weird wick, its really long wick, its like count, its done deal')).toBe(
+      'its hard edge, its wild swings, its crazy volatility, its weird wick, its really long wick, its like count, its done deal'
+    )
+  })
+
+  it('capitalises day and month names; the ones that are also words only as dates', () => {
+    expect(corrected('monday tuesday wednesday thursday friday saturday sunday, fridays')).toBe('Monday Tuesday Wednesday Thursday Friday Saturday Sunday, Fridays')
+    expect(corrected('january february april june july august september october november december')).toBe('January February April June July August September October November December')
+    expect(corrected('jan feb apr jun jul aug sep sept oct nov dec, mon tue thu fri')).toBe('Jan Feb Apr Jun Jul Aug Sep Sept Oct Nov Dec, Mon Tue Thu Fri')
+    expect(corrected('on may 5th and march 20, 2026. in march it ran. the 5th of may. since may the range held. 3rd march')).toBe(
+      'on May 5th and March 20, 2026. in March it ran. the 5th of May. since May the range held. 3rd March'
+    )
+    expect(corrected('sat 11/22 was slow, wed nov 25 too')).toBe('Sat 11/22 was slow, Wed Nov 25 too')
+    // The words stay words.
+    expect(corrected('price may march on. we sat in the sun. the sun may rise. we may 2 more contracts. march 20 was the low')).toBe(
+      'price may march on. we sat in the sun. the sun may rise. we may 2 more contracts. march 20 was the low'
+    )
+  })
 })
 
 describe('reading text', () => {

@@ -30,7 +30,7 @@
  */
 import { applyTextEdits, correctText, type TextEdit } from './autocorrect'
 import { capitalise, isAllCaps, isCapitalised, letterCount, TIME_RE, tokenize, type Speller, type Token } from './spelling'
-import { lookupTerm, TERMS } from './tradingTerms'
+import { lookupTerm, spelledOutTerms, TERMS } from './tradingTerms'
 import { IRREGULAR_PAST } from './wordFixes'
 import type { RichDoc, RichMark, RichNode } from './types'
 
@@ -580,9 +580,9 @@ const PHRASES: Array<[RegExp, Source, number]> = [
   [/\bwant(?:ed)? to see\b/i, 'plan', 4],
   [/\b(?:plan|bias|idea|game plan) for (?:today|tomorrow|the day|the session|this week|next week)\b/i, 'plan', 4],
   [/^(?:\d{1,2}:\d{2}(?::\d{2})?\s*[—–-]\s*)?if\b/i, 'plan', 2],
-  [/\bdraw on liquidity\b/i, 'plan', 2],
   [/\bgame plan\b/i, 'plan', 3],
-  [/\b(?:silver bullet|turtle soup|judas swing|order block|breaker block|fair value gap|power of three)\b/i, 'market', 1.5],
+  // (Fair value gaps, order blocks, the draw on liquidity and the other ICT terms written out count as their codes: see spelledOutTerms.)
+  [/\b(?:silver bullet|turtle soup|judas swing|power of three)\b/i, 'market', 1.5],
   [/\bnext time\b/i, 'lessons', 2.5],
   [/\bnote to self\b/i, 'lessons', 3],
   [/\bneed to\b/i, 'lessons', 1.5],
@@ -637,6 +637,14 @@ export function classifyStatement(text: string): StatementTopic {
     }
   }
   for (const [pattern, source, weight] of PHRASES) if (pattern.test(body)) scores[TOPIC_OF[source]] += weight
+  // "new week opening gap" counts as much as "NWOG" (on top of its words); an ICT term no
+  // keyword lists counts for the market.
+  for (const term of spelledOutTerms(body)) {
+    const code = term.code.toLowerCase()
+    const sources = (Object.keys(KEYWORDS) as Source[]).filter((source) => KEYWORDS[source][code] !== undefined)
+    if (sources.length === 0) scores.setup += 1
+    for (const source of sources) scores[TOPIC_OF[source]] += KEYWORDS[source][code]!
+  }
   const firstWord = tokens.find((token) => token.kind === 'word')?.text.toLowerCase().replace(/’/g, "'")
   if (firstWord && IMPERATIVE_STARTS.has(firstWord)) scores.lessons += 2
 
@@ -655,9 +663,10 @@ const SPECIFIC_TERMS = new Set([
   'pwh', 'pwl', 'pmh', 'pml', 'pda', 'eqh', 'eql', 'erl', 'irl', 'dol', 'ssl', 'bsl', 'onh', 'onl', 'ibh', 'ibl', 'hod', 'lod', 'poc', 'vah', 'lvn', 'hvn'
 ])
 
-/** The specific ICT terms and the prices a sentence names. */
+/** The specific ICT terms (written as codes or in words: "NWOG", "new week opening gap") and the prices a sentence names. */
 export function sharedKeys(text: string): Set<string> {
   const keys = new Set<string>()
+  for (const term of spelledOutTerms(text)) if (SPECIFIC_TERMS.has(term.code.toLowerCase())) keys.add(term.code.toLowerCase())
   for (const token of tokenize(text)) {
     if (token.kind === 'protected' && PRICE_RE.test(token.text)) keys.add(`price:${token.text.replace(/,/g, '')}`)
     if (token.kind !== 'word') continue

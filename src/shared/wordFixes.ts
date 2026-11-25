@@ -124,10 +124,46 @@ export const LOSE_AFTER: ReadonlySet<string> = new Set([
   "didn't", 'didnt', "won't", 'wont', "can't", 'cant', 'not', 'never', "i'll", 'ill', "we'll", "you'll", 'always', 'often', 'usually'
 ])
 
-/** "its" is "it's" before these: "its not the setup", "its been a week". */
+/**
+ * "its" is "it's" before these: words that can never follow the possessive "its" ("its not the
+ * setup", "its been a week", "its just the god candles", "its a good day").
+ */
 export const ITS_BEFORE: ReadonlySet<string> = new Set([
-  'not', 'been', 'gonna', 'going', 'a', 'an', 'the', 'ok', 'okay', 'fine', 'just', 'over', 'so', 'really', 'still', 'always', 'never',
-  'too', 'what', 'done', 'like', 'because', 'bc', 'about', 'getting', 'hard', 'easy', 'crazy', 'funny', 'weird', 'insane', 'wild'
+  'not', 'been', 'gonna', 'going', 'a', 'an', 'the', 'ok', 'okay', 'fine', 'just', 'over', 'so', 'too', 'really', 'very', 'still', 'always',
+  'never', 'what', 'because', 'bc', 'about', 'getting', 'all', 'literally', 'actually', 'basically', 'probably', 'definitely', 'kinda',
+  'such', 'no', 'my', 'your', 'our', 'their', 'this', 'that', 'like'
+])
+/**
+ * ... except where they start what "its" owns: "its going rate", "its all-time high", "its very
+ * own range", "its like count". After "very" and "really" the next word must also be one of
+ * these or a description that ends there ("its very hard to", "its really not"), never one that
+ * goes on to a thing ("its really long wick").
+ */
+export const ITS_NOT_BEFORE: Readonly<Record<string, ReadonlySet<string>>> = {
+  going: new Set(['rate', 'rates', 'price']),
+  all: new Set(['time']),
+  very: new Set(['own', 'first', 'last', 'best', 'worst', 'next', 'same', 'beginning', 'end', 'top', 'bottom', 'start', 'edge', 'nature']),
+  like: new Set(['count', 'counts', 'button'])
+}
+/**
+ * After "its", these describe something: "it's" only when nothing it could own follows ("its
+ * hard to wait", "its crazy how", "its done."), never in "its wild swings" or "its hard edge".
+ */
+export const ITS_BEFORE_ADJECTIVE: ReadonlySet<string> = new Set(['hard', 'easy', 'crazy', 'funny', 'weird', 'insane', 'wild', 'done', 'normal', 'true', 'obvious', 'tough', 'brutal', 'annoying', 'frustrating', 'good', 'bad'])
+/** Words after such a description that show it ends there: "its hard to", "its crazy how". */
+export const ITS_ADJECTIVE_FOLLOWERS: ReadonlySet<string> = new Set(['to', 'how', 'when', 'that', 'af', 'asf', 'tbh', 'ngl', 'rn', 'now', 'today', 'sometimes', 'man', 'bro', 'lol', 'lmao'])
+
+/**
+ * Day and month names that are also English words ("may", "march", "wed", "sat", "sun") are
+ * capitalised only where they are clearly dates: "may 5th", "march 20", "in march", "the 5th of
+ * may", "sat 11/22", "wed nov 25". The other names are always capitalised (friday -> Friday).
+ */
+export const DATE_WORDS: Readonly<Record<string, string>> = { may: 'May', march: 'March', wed: 'Wed', sat: 'Sat', sun: 'Sun' }
+/** Before a month name that is also a word, these make it the month: "in may", "early march". */
+export const MONTH_AFTER: ReadonlySet<string> = new Set(['in', 'of', 'since', 'until', 'till', 'through', 'early', 'mid', 'late', 'during'])
+export const MONTH_NAMES: ReadonlySet<string> = new Set([
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+  'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'
 ])
 
 /** Words that end a sentence-like chunk without ending a sentence: "e.g. this", "vs. that". */

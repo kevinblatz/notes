@@ -105,6 +105,7 @@ hotkey keeps the combination it had.
 | **Organize** (the wand beside Draw), or **Ctrl + Shift + O** | Fix the spelling, grammar and punctuation of the whole note, and put back together a thought that strayed off and came back. See *Organize and spelling* below. |
 | Right-click an underlined word | Pick one of up to four suggestions, or *Add to dictionary*. |
 | Click an image, drag its corner | Resize it (the proportions are kept). Type under it to add a caption. |
+| Type a long title or caption | It wraps onto as many lines as it needs, so all of it stays readable in a narrow window (on the board too). It is still one line of text: **Enter** in the title goes on to the note text (so does **↓** on the title's last line), **Enter** in a caption goes back to the note text, and a pasted line break becomes a space. |
 | **Ctrl + click** a link while editing | Open it in your browser. On the board a plain click opens it. |
 | *Add tag*, under the note | Label the note (Rules, Setups and Journal are suggested; any word works). Find can filter by tag. |
 
@@ -148,7 +149,9 @@ thought wandered off and came back, put back together.
 
 1. **Fixes words** it is sure about, in the text and in picture captions: displacment →
    displacement, imapatient → impatient, tommorow → tomorrow; dont → don't, im → I'm, thats →
-   that's, a lone i → I; trading terms in their usual form (fvg → FVG, ifvgs → IFVGs, nwog → NWOG,
+   that's, a lone i → I; day and month names (friday → Friday, november → November; *may*,
+   *march*, *wed*, *sat* and *sun* only as dates: "may 5th" → "May 5th", "in march" → "in
+   March"); trading terms in their usual form (fvg → FVG, ifvgs → IFVGs, nwog → NWOG,
    choch → CHoCH, ce → CE, asia → Asia, +2r → +2R); a few shorthands (bc and b/c → because, w/ →
    with, w/o → without, tmrw → tomorrow, b4 → before). A short code that is also a word (am, es,
    ob, org, mt ...) is only written as a term in a sentence about the market: "ny am killzone"
@@ -159,7 +162,9 @@ thought wandered off and came back, put back together.
    links, highlights and colours are kept.
 2. **Fixes grammar slips** where there is no doubt: "re entered" → "re-entered", "to early" →
    "too early" (also too nervous, too tired, too scared ...), "should of waited" → "should have
-   waited", "its not" → "it's not", "don't want to loose" → "lose", "a IFVG" → "an IFVG" (before
+   waited", "its not" → "it's not" (only before words that can never follow *its*: "its just",
+   "its a", "its been", "its hard to"; "its range" and "its wild swings" stay), "don't want to
+   loose" → "lose", "a IFVG" → "an IFVG" (before
    a code that starts with A, E, I or O), "new york" → "New York", "the the" → "the".
 3. **Fixes punctuation**: a capital at the start of each sentence (a code there in its own
    capitals: "es was slow" → "ES was slow"), single spaces, no doubled commas, no space before a
@@ -173,8 +178,10 @@ thought wandered off and came back, put back together.
 4. **Puts a stray thought back.** When your writing leaves a thought for a sentence or two and
    comes back to it, the stray moves out of the way, as a paragraph of its own after the one you
    came back in. This only happens close by, and only when you clearly came back: with *anyway*,
-   *back to ...*, or by naming the same level again (and then only when the stray has nothing to
-   do with the market, like "ugh my neighbor is drilling again"). A story told in order (trade,
+   *back to ...*, or by naming the same level again, in its code or in words (*NWOG* and *new
+   week opening gap*, *FVG* and *fair value gap*, *BSL* and *buy side liquidity*, *PDH* and
+   *previous day high* are the same level), and then only when the stray has nothing to do
+   with the market, like "ugh my neighbor is drilling again". A story told in order (trade,
    how you felt, the next trade) is never taken apart, and your paragraphs stay as they are. No
    headings or bullets are added.
 

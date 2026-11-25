@@ -126,3 +126,76 @@ export const CASUAL_WORD_SET: ReadonlySet<string> = new Set([...CASUAL_WORDS, ..
 export function lookupTerm(word: string): TermEntry | null {
   return TERMS.get(word.toLowerCase()) ?? null
 }
+
+/**
+ * ICT terms written out in words, with the code each one stands for: "new week opening gap" is
+ * the NWOG, "buy side liquidity" the BSL. Organize links two sentences that name the same thing
+ * however it is written. Longer names come first ("inverse fair value gap" before "fair value
+ * gap"); a hyphen or no space at all between parts is fine ("buy-side", "buyside").
+ */
+const SPELLED_OUT: ReadonlyArray<[string, string]> = [
+  ['new week(?:ly)? opening gaps?', 'NWOG'],
+  ['new day opening gaps?|new daily opening gaps?', 'NDOG'],
+  ['(?:inverse|inversion|inverted) (?:fair value gaps?|fvgs?)', 'IFVG'],
+  ['fair value gaps?', 'FVG'],
+  ['balanced price ranges?', 'BPR'],
+  ['buy ?side imbalance,? sell ?side inefficiency', 'BISI'],
+  ['sell ?side imbalance,? buy ?side inefficiency', 'SIBI'],
+  ['optimal trade entry|optimal trade entries', 'OTE'],
+  ['market structure shifts?|shifts? in market structure', 'MSS'],
+  ['breaks? of (?:market )?structure', 'BOS'],
+  ['changes? of character', 'CHoCH'],
+  ['changes? in (?:the )?state of delivery', 'CISD'],
+  ["(?:previous|prior) day(?:'?s)? highs?|yesterday(?:'?s)? highs?", 'PDH'],
+  ["(?:previous|prior) day(?:'?s)? lows?|yesterday(?:'?s)? lows?", 'PDL'],
+  ["(?:previous|prior|last) week(?:'?s)? highs?", 'PWH'],
+  ["(?:previous|prior|last) week(?:'?s)? lows?", 'PWL'],
+  ['buy ?side liquidity', 'BSL'],
+  ['sell ?side liquidity', 'SSL'],
+  ['equal highs', 'EQH'],
+  ['equal lows', 'EQL'],
+  ['external range liquidity', 'ERL'],
+  ['internal range liquidity', 'IRL'],
+  ['draws? on liquidity', 'DOL'],
+  ['premium (?:and|or|/) discount arrays?', 'PDA'],
+  ['order blocks?', 'OB'],
+  ['breaker blocks?', 'BB'],
+  ['mitigation blocks?', 'MB'],
+  ['rejection blocks?', 'RB'],
+  ['volume imbalances?', 'VI'],
+  ['overnight highs?', 'ONH'],
+  ['overnight lows?', 'ONL'],
+  ['initial balance highs?', 'IBH'],
+  ['initial balance lows?', 'IBL'],
+  ['highs? of (?:the )?day', 'HOD'],
+  ['lows? of (?:the )?day', 'LOD'],
+  ['points? of control', 'POC'],
+  ['value area highs?', 'VAH'],
+  ['low volume nodes?', 'LVN'],
+  ['high volume nodes?', 'HVN']
+]
+
+/** Each name as a pattern: one or more spaces or a hyphen between words, an optional one where written " ?". */
+const namePattern = (words: string): string => words.replace(/ \?/g, '\u0001').replace(/ /g, '[ -]+').replace(/\u0001/g, '[ -]?').replace(/'/g, "['’]")
+const SPELLED_OUT_RE = new RegExp(SPELLED_OUT.map(([words], index) => `(?<t${index}>${namePattern(words)})`).join('|'), 'giu')
+
+export interface SpelledOutTerm {
+  from: number
+  to: number
+  /** The code it stands for, as written in CANONICAL_TERMS or AMBIGUOUS_TERMS ("NWOG", "OB"). */
+  code: string
+}
+
+/** The ICT terms written out in words in a text: "missing that new week opening gap" -> NWOG. */
+export function spelledOutTerms(text: string): SpelledOutTerm[] {
+  const found: SpelledOutTerm[] = []
+  for (const match of text.matchAll(SPELLED_OUT_RE)) {
+    const from = match.index
+    const to = from + match[0].length
+    // Whole words only: not "unequal highs" or "fair value gapping".
+    if (/[\p{L}\p{N}]/u.test(text[from - 1] ?? '') || /[\p{L}\p{N}]/u.test(text[to] ?? '')) continue
+    const group = Object.entries(match.groups ?? {}).find(([, value]) => value !== undefined)
+    if (group) found.push({ from, to, code: SPELLED_OUT[Number(group[0].slice(1))]![1] })
+  }
+  return found
+}

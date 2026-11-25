@@ -159,7 +159,8 @@ button:disabled {
 }
 
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -476,6 +477,17 @@ kbd {
   font: 680 calc(var(--note-size) * 1.2) / 1.3 var(--note-font);
   letter-spacing: -0.005em;
   overflow-wrap: anywhere;
+}
+/*
+ * A long title wraps, whole, onto as many lines as it needs. Its first line stops short of the
+ * note's controls, which appear over the top right corner on hover, so no word is ever hidden
+ * under them.
+ */
+.note-title::before {
+  content: '';
+  float: right;
+  width: 58px;
+  height: 1em;
 }
 .note-collapsed {
   margin: 0;
@@ -807,6 +819,18 @@ kbd {
   color: var(--ink-soft);
   font-size: 13px;
   user-select: text;
+}
+/*
+ * The title and image captions wrap onto as many lines as they need and grow with their text,
+ * so they can be read whole at any window width (they never scroll sideways or get cut off).
+ */
+.focus-title,
+.image-caption {
+  field-sizing: content;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 .focus-title {
   display: block;
@@ -1692,13 +1716,16 @@ p.setting-help {
   gap: 2px;
   padding: 5px 6px 5px 16px;
 }
+/* A long caption shows two lines here (the picture comes first); all of it on hover. */
 .preview-caption {
   flex: 1;
   min-width: 0;
-  color: var(--ink-soft);
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
   user-select: text;
 }
 .preview-zoom {

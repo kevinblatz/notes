@@ -21,7 +21,7 @@ import { noteSaved, noteSaveState, returnToBoard, setActiveEditor, setActiveSave
 import { NoteSaver, type SaveState } from '../../state/saver'
 import { getState, useStore, type View } from '../../state/store'
 import { editEntries, openedFromKeyboard, spellingEntries } from '../editMenu'
-import { SpellInput } from '../SpellInput'
+import { caretOnLastLine, SpellInput, SpellTextArea } from '../SpellInput'
 import { MenuList, Popover } from '../ui'
 import { useDrawingSession } from './drawingSession'
 import { appendLogEntries, buildExtensions, insertImageFiles, positionFromHint, syncSelectionFromPage } from './extensions'
@@ -437,10 +437,10 @@ export function NoteEditor({ view }: { view: NoteView }) {
               The app did not close normally last time. This is the note you had open, as it was last saved; anything typed in the final moment before it closed may be missing.
             </p>
           ) : null}
-          <SpellInput
+          {/* One line of text that wraps onto as many lines as it needs: never cut off in a narrow window. */}
+          <SpellTextArea
             fieldClassName="focus-title-field"
             className="focus-title"
-            type="text"
             value={title}
             placeholder="Title (optional)"
             aria-label="Title (optional)"
@@ -451,7 +451,10 @@ export function NoteEditor({ view }: { view: NoteView }) {
               changed()
             }}
             onKeyDown={(event) => {
-              if ((event.key === 'Enter' && !event.ctrlKey && !event.metaKey) || event.key === 'ArrowDown') {
+              if (event.nativeEvent.isComposing) return
+              // Enter, or the down arrow on the title's last line, goes on into the note text.
+              const intoText = (event.key === 'Enter' && !event.ctrlKey && !event.metaKey) || (event.key === 'ArrowDown' && !event.shiftKey && caretOnLastLine(event.currentTarget))
+              if (intoText) {
                 event.preventDefault()
                 editor.commands.focus('start')
               } else if (event.key === 'Enter') {

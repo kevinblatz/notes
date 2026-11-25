@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import { expect, test } from './fixtures'
-import { clickEmptySpace, collectConsoleErrors, copyImageToClipboard, editorBody, focusView, makePng, noteByText, storedNotes } from './helpers'
+import { clickEmptySpace, collectConsoleErrors, copyImageToClipboard, editorBody, focusView, makePng, noteByText, notes, storedNotes } from './helpers'
 import { freshDataDir, launch, removeDataDir, setWindowSize, type Launched } from './launch'
 
 const SIZE = { width: 960, height: 1000 }
@@ -109,7 +109,7 @@ test('the app’s own checker: Chromium’s is off, trading terms are known, a m
   await expect.poll(() => page.locator('.focus-title-field .spell-miss').allTextContents()).toEqual(['londn', 'sesion'])
   // Each underline sits under its own word in the field.
   const geometry = await page.locator('.focus-title-field').evaluate((field) => {
-    const input = field.querySelector('input')!
+    const input = field.querySelector<HTMLElement>('.focus-title')!
     const miss = field.querySelector('.spell-miss')!.getBoundingClientRect()
     const box = input.getBoundingClientRect()
     const canvas = document.createElement('canvas').getContext('2d')!
@@ -575,7 +575,7 @@ test('title underlines stay under their words when the default font changes, and
   /** The copy over the field is laid out exactly as the field: same box, same font. */
   const layout = (): Promise<string[]> =>
     page.locator('.focus-title-field').evaluate((field) => {
-      const input = field.querySelector('input')!
+      const input = field.querySelector<HTMLElement>('.focus-title')!
       const mirror = field.querySelector<HTMLElement>('.spell-mirror')!
       const a = getComputedStyle(input)
       const b = getComputedStyle(mirror)
@@ -598,6 +598,198 @@ test('title underlines stay under their words when the default font changes, and
   // The field's copy is clipped at its sides only, so the wave below the words is whole.
   const overflow = await page.locator('.focus-title-field .spell-mirror').evaluate((mirror) => ({ x: getComputedStyle(mirror).overflowX, y: getComputedStyle(mirror).overflowY }))
   expect(overflow).toEqual({ x: 'clip', y: 'visible' })
+})
+
+// ---------------------------------------------------------------- titles and captions in a narrow window
+
+const LONG_TITLE = 'Wednesday 11/25 "Continuation Scalping to a planned level off the NWOG after the overnight dump, waitng for displacment"'
+const LONG_CAPTION = 'NQ 5 min: the unmitigated FVG under price, it kept moving upward towards nothingness before the dump into the new week opening gap, teh sweep'
+
+/** How a wrapping field sits: its lines, whether anything scrolls or is cut off, and its text. */
+const fieldFit = (field: Locator) =>
+  field.evaluate((element) => {
+    const area = element as HTMLTextAreaElement
+    const box = area.getBoundingClientRect()
+    const scroller = document.querySelector('.focus-scroll')!
+    return {
+      tag: area.tagName.toLowerCase(),
+      lines: Math.round(area.clientHeight / parseFloat(getComputedStyle(area).lineHeight)),
+      scrollsSideways: area.scrollWidth > area.clientWidth,
+      scrollsDown: area.scrollHeight > area.clientHeight + 1,
+      inWindow: box.left >= 0 && box.right <= window.innerWidth,
+      pageCutOff: document.documentElement.scrollWidth > window.innerWidth || scroller.scrollWidth > scroller.clientWidth,
+      value: area.value
+    }
+  })
+
+/**
+ * Click the middle of an underlined word of a field: where the caret lands in the field itself,
+ * the word's range, and whether the word is on a line after the field's first.
+ */
+async function clickUnderlined(page: Page, fieldClass: string, word: string): Promise<{ caret: number; from: number; to: number; laterLine: boolean }> {
+  const miss = page.locator(`${fieldClass} .spell-miss`, { hasText: word })
+  const box = (await miss.boundingBox())!
+  const field = (await page.locator(`${fieldClass} textarea`).boundingBox())!
+  const lineHeight = await page.locator(`${fieldClass} textarea`).evaluate((area) => parseFloat(getComputedStyle(area).lineHeight))
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.4)
+  return {
+    caret: await page.locator(`${fieldClass} textarea`).evaluate((area) => (area as HTMLTextAreaElement).selectionStart),
+    from: Number(await miss.getAttribute('data-miss-from')),
+    to: Number(await miss.getAttribute('data-miss-to')),
+    laterLine: box.y + box.height / 2 > field.y + lineHeight
+  }
+}
+
+test('at 680 px the title and a caption wrap onto as many lines as they need: all of them in view, Enter still leaves them, underlines under their words on every line', async () => {
+  const { page, app } = ctx
+  await setWindowSize(app, page, 680, SIZE.height)
+  await newNote(page)
+  await page.keyboard.type('Missed dump to NWOG, took 4-5 trades in the hour of 845-930.')
+  await copyImageToClipboard(app, makePng(640, 300, [60, 110, 220]))
+  await page.keyboard.press('Control+v')
+  await expect(page.locator('.focus-editor .image-node img')).toBeVisible()
+  await page.locator('.focus-editor .image-node img').click()
+  await page.locator('.focus-editor .image-caption').fill(LONG_CAPTION)
+  const title = page.locator('.focus-title')
+  await title.fill(LONG_TITLE)
+  await editorBody(page).click()
+
+  // The whole title is there to read, on three lines, and nothing scrolls or is cut off.
+  expect(await fieldFit(title)).toEqual({ tag: 'textarea', lines: 3, scrollsSideways: false, scrollsDown: false, inWindow: true, pageCutOff: false, value: LONG_TITLE })
+  const caption = page.locator('.focus-editor .image-caption')
+  expect(await fieldFit(caption)).toEqual({ tag: 'textarea', lines: 2, scrollsSideways: false, scrollsDown: false, inWindow: true, pageCutOff: false, value: LONG_CAPTION })
+
+  // The misspelled words on a wrapped line are underlined right under themselves: clicking the
+  // middle of an underline puts the caret inside that very word.
+  await expect.poll(() => page.locator('.focus-title-field .spell-miss').allTextContents()).toEqual(['waitng', 'displacment'])
+  for (const word of ['waitng', 'displacment']) {
+    const hit = await clickUnderlined(page, '.focus-title-field', word)
+    expect(hit.laterLine, word).toBe(true)
+    expect(hit.caret, word).toBeGreaterThan(hit.from)
+    expect(hit.caret, word).toBeLessThan(hit.to)
+  }
+  await expect.poll(() => page.locator('.image-caption-field .spell-miss').allTextContents()).toEqual(['teh'])
+  const inCaption = await clickUnderlined(page, '.image-caption-field', 'teh')
+  expect(inCaption.laterLine).toBe(true)
+  expect(inCaption.caret).toBeGreaterThan(inCaption.from)
+  expect(inCaption.caret).toBeLessThan(inCaption.to)
+  // ... and right-clicking it offers that word's suggestions.
+  await rightClickMiss(page, '.image-caption-field', 'teh')
+  await editMenu(page).getByRole('menuitem', { name: 'the', exact: true }).click()
+  await expect(caption).toHaveValue(LONG_CAPTION.replace('teh', 'the'))
+
+  // Enter in a caption still goes back to the note text; no line break is ever added.
+  await caption.click()
+  await page.keyboard.press('Enter')
+  await expect(editorBody(page)).toBeFocused()
+  await expect(caption).toHaveValue(LONG_CAPTION.replace('teh', 'the'))
+
+  // In the title, Enter and Shift+Enter go on into the note text; the down arrow does on the
+  // title's last line only.
+  for (const key of ['Enter', 'Shift+Enter']) {
+    await title.click()
+    await page.keyboard.press('Control+End')
+    await page.keyboard.press(key)
+    await expect(editorBody(page), key).toBeFocused()
+    await expect(title).toHaveValue(LONG_TITLE)
+  }
+  await title.click()
+  await page.keyboard.press('Control+Home')
+  await page.keyboard.press('ArrowDown')
+  await expect(title).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(title).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(editorBody(page)).toBeFocused()
+  // Pasted line breaks become spaces.
+  await app.evaluate(({ clipboard }) => clipboard.writeText('Wednesday 11/25\nContinuation scalping\r\nto a planned level'))
+  await title.click()
+  await page.keyboard.press('Control+a')
+  await page.keyboard.press('Control+v')
+  await expect(title).toHaveValue('Wednesday 11/25 Continuation scalping to a planned level')
+  await title.fill(LONG_TITLE)
+
+  // A wider font wraps onto more lines: the underlines follow, still under their words.
+  await editorBody(page).click()
+  await page.keyboard.press('Control+,')
+  await page.getByRole('combobox', { name: 'Default font' }).selectOption({ label: 'JetBrains Mono' })
+  await page.getByRole('combobox', { name: 'Default text size' }).selectOption({ label: '20 px' })
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings')).toBeHidden()
+  await expect(title).toHaveCSS('font-family', /JetBrains Mono/)
+  await expect.poll(async () => (await fieldFit(title)).lines).toBeGreaterThan(3)
+  expect(await fieldFit(title)).toMatchObject({ scrollsSideways: false, scrollsDown: false, inWindow: true, pageCutOff: false })
+  const mono = await clickUnderlined(page, '.focus-title-field', 'displacment')
+  expect(mono.laterLine).toBe(true)
+  expect(mono.caret).toBeGreaterThan(mono.from)
+  expect(mono.caret).toBeLessThan(mono.to)
+
+  // On the board the card shows the whole title and caption too, and the note's controls,
+  // shown on hover, never cover a word of the title.
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+  const card = notes(page).first()
+  await expect(card.locator('.note-title')).toHaveText(LONG_TITLE)
+  await expect(card.locator('figcaption')).toHaveText(LONG_CAPTION.replace('teh', 'the'))
+  await card.locator('.note-title').hover()
+  await expect(card.locator('.note-tools')).toBeVisible()
+  const covered = await card.evaluate((element) => {
+    const tools = element.querySelector('.note-tools')!.getBoundingClientRect()
+    const range = document.createRange()
+    range.selectNodeContents(element.querySelector('.note-title')!)
+    const words = Array.from(range.getClientRects())
+    const overlaps = words.filter((r) => r.right > tools.left && r.left < tools.right && r.bottom > tools.top && r.top < tools.bottom)
+    const cut = Array.from(element.querySelectorAll<HTMLElement>('.note-title, figcaption')).filter((part) => part.scrollWidth > part.clientWidth || part.scrollHeight > part.clientHeight + 1)
+    return { lines: words.length, overlaps: overlaps.length, cut: cut.length, inCard: words.every((r) => r.right <= element.getBoundingClientRect().right) }
+  })
+  expect(covered.lines).toBeGreaterThan(1)
+  expect(covered).toMatchObject({ overlaps: 0, cut: 0, inCard: true })
+})
+
+/** A real note from the user, typed after a session ("umitigated" in italics), with the chart under it. */
+const REAL_ONE_BEFORE =
+  'Missed dump to NWOG taking shit, got back and took 4-5 trades in the hour of 845-930. All scalps. 10 contracts a pull. Hit a few lost a few, im understanding the market a little more on the micros, its just the god candles fuck me sometimes. Also unmiitigated 5 min fvg kept edging that it was gonna go touch it but price kept moving upward tpwards nothingness, i knew price would wanna sweep and mitigate that 5 min fvg, so instead of waiting for it to do that and wait for an entry, my entry IS the way down to that 5 min fvg '
+const REAL_ONE_AFTER = '. BIG HELP. Not the greatest feeling day but up 1400 pnl across 3 accounts. All evals so hopefully friday or next week can get these funded.'
+const REAL_TWO =
+  'Biggest headache today is missing that new week opening gap while shitting, i know my rule is not to trade first 15 min but granted the conditions of overnight dump.'
+const REAL_ORGANIZED = [
+  "Missed dump to NWOG taking shit, got back and took 4-5 trades in the hour of 845-930. All scalps. 10 contracts a pull. Hit a few lost a few, I'm understanding the market a little more on the micros, it's just the god candles fuck me sometimes. Also unmitigated 5 min FVG kept edging that it was gonna go touch it but price kept moving upward towards nothingness, I knew price would wanna sweep and mitigate that 5 min FVG, so instead of waiting for it to do that and wait for an entry, my entry IS the way down to that 5 min FVG unmitigated. BIG HELP. Not the greatest feeling day but up 1400 PnL across 3 accounts. All evals so hopefully Friday or next week can get these funded.",
+  'Biggest headache today is missing that new week opening gap while shitting, I know my rule is not to trade first 15 min but granted the conditions of overnight dump.'
+]
+
+test('Organize on a real note: only the slips are fixed; the trader’s own words, both paragraphs, the italics and the chart stay', async () => {
+  const { page, app } = ctx
+  await newNote(page)
+  const title = 'Wednesday 11/25 "Continuation Scalping to a planned level"'
+  await page.locator('.focus-title').fill(title)
+  await editorBody(page).click()
+  await page.keyboard.type(REAL_ONE_BEFORE)
+  await page.keyboard.press('Control+i')
+  await page.keyboard.type('umitigated')
+  await page.keyboard.press('Control+i')
+  await page.keyboard.type(REAL_ONE_AFTER)
+  await page.keyboard.press('Enter')
+  await page.keyboard.type(REAL_TWO)
+  await page.keyboard.press('Enter')
+  await copyImageToClipboard(app, makePng(1280, 720, [30, 34, 40]))
+  await page.keyboard.press('Control+v')
+  await expect(page.locator('.focus-editor .image-node img')).toBeVisible()
+  await expect.poll(() => underlined(page)).toEqual(['im', 'unmiitigated', 'tpwards', 'i', 'umitigated', 'friday', 'i'])
+
+  await page.keyboard.press('Control+Shift+O')
+  await expect(toast(page)).toContainText('Fixed 12 words')
+  expect(await outline(page)).toEqual([...REAL_ORGANIZED, '[image]'])
+  await expect(editorBody(page).locator(':scope > p').first().locator('em')).toHaveText(['unmitigated'])
+  await expect(page.locator('.focus-title')).toHaveValue(title)
+  await expect.poll(() => underlined(page)).toEqual([])
+  // Organizing it again changes nothing.
+  await page.keyboard.press('Control+Shift+O')
+  await expect(toast(page)).toHaveText(/Already tidy/)
+  await page.keyboard.press('Control+Enter')
+  await expect(focusView(page)).toBeHidden()
+  const [note] = await storedNotes(app)
+  expect(note!.plainText.split('\n').filter(Boolean)).toEqual(REAL_ORGANIZED)
+  expect(JSON.stringify(note!.content)).toContain('"noteImage"')
 })
 
 test('the app makes no network requests: Chromium’s own spelling checker downloads no dictionary', async () => {

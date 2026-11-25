@@ -5,7 +5,7 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { drawingScaleAttr } from '@shared/drawing'
 import { attachmentUrl } from '@shared/types'
 import { openImagePreview } from '../../state/actions'
-import { SpellInput } from '../SpellInput'
+import { SpellTextArea } from '../SpellInput'
 import { openDrawing } from './drawingSession'
 
 const MIN_WIDTH = 10
@@ -117,10 +117,10 @@ export function ImageNodeView({ node, updateAttributes, selected, editor, getPos
         ) : null}
         {dragWidth !== null ? <span className="image-size-badge">{dragWidth}%</span> : null}
       </div>
-      <SpellInput
+      {/* One line of text that wraps onto as many lines as it needs. */}
+      <SpellTextArea
         fieldClassName="image-caption-field"
         className="image-caption"
-        type="text"
         value={caption}
         placeholder="Add a caption"
         aria-label="Image caption"

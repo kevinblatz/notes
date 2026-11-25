@@ -13,14 +13,34 @@
  *    "an" however it is read ("a FVG" is left: some read it "a fair value gap").
  *  - "should of waited" -> "should have waited": a modal, "of", then a past form.
  *  - "don't want to loose" -> "lose", and "its not" -> "it's not": only next to words that
- *    leave no doubt.
- *  - "new York" -> "New York".
+ *    leave no doubt ("its just", "its a", "its hard to"; never "its range", "its wild swings").
+ *  - "new York" -> "New York"; day and month names that are also words become names only as
+ *    dates ("may 5th" -> "May 5th", "in march" -> "in March", "sat 11/22" -> "Sat 11/22").
  *
  * Nothing else is rewritten: no word order, no style, no "clever" grammar.
  */
 import { isAllCaps, matchCase, wordsWithContext, type Speller, type Token } from './spelling'
 import { lookupTerm } from './tradingTerms'
-import { IRREGULAR_PAST, ITS_BEFORE, LOSE_AFTER, MODAL_ADVERBS, MODALS, NEVER_DOUBLED, TOO_AFTER, TOO_AFTER_BE, TOO_NEEDS_BE, TOO_NEEDS_CLAUSE_END, TOO_NEEDS_CONTEXT, TOO_WORDS } from './wordFixes'
+import {
+  DATE_WORDS,
+  IRREGULAR_PAST,
+  ITS_ADJECTIVE_FOLLOWERS,
+  ITS_BEFORE,
+  ITS_BEFORE_ADJECTIVE,
+  ITS_NOT_BEFORE,
+  LOSE_AFTER,
+  MODAL_ADVERBS,
+  MODALS,
+  MONTH_AFTER,
+  MONTH_NAMES,
+  NEVER_DOUBLED,
+  TOO_AFTER,
+  TOO_AFTER_BE,
+  TOO_NEEDS_BE,
+  TOO_NEEDS_CLAUSE_END,
+  TOO_NEEDS_CONTEXT,
+  TOO_WORDS
+} from './wordFixes'
 
 export interface TextEdit {
   from: number
@@ -80,6 +100,48 @@ export function correctText(text: string, speller: Speller, skip?: (from: number
     return !!next && next.token.kind === 'word' && spaced(item, next) && CLAUSE_WORDS.has(next.token.text.toLowerCase())
   }
 
+  /** A description after "its" that ends there: "its hard.", "its crazy how", "its done lol". */
+  const describesToTheEnd = (index: number): boolean => {
+    const after = nextWord(index)
+    return clauseEndsAfter(index) || (!!after && ITS_ADJECTIVE_FOLLOWERS.has(lower(after)))
+  }
+  /** The "its" before the word at `index` can only be "it is" (or "it has"). */
+  const itsIsItIs = (index: number): boolean => {
+    const word = items[index]!
+    if (word.token.hyphenPart) return false
+    const after = nextWord(index)
+    const said = lower(word)
+    if (after && ITS_NOT_BEFORE[said]?.has(lower(after))) return false
+    if (said === 'very' || said === 'really') {
+      if (!after || after.token.hyphenPart) return false
+      return ITS_BEFORE.has(lower(after)) || describesToTheEnd(index + 1)
+    }
+    if (ITS_BEFORE.has(said)) return true
+    return ITS_BEFORE_ADJECTIVE.has(said) && describesToTheEnd(index)
+  }
+  /** A day or month name that is also a word ("may", "march", "sat") used as a date: "may 5th", "in march", "sat 11/22". */
+  const isDate = (index: number): boolean => {
+    const word = items[index]!
+    const said = lower(word)
+    const rest = text.slice(word.token.to)
+    // "may 5th", "march 20, 2026", "march 20." (not "may 2 more", "march 20 was")
+    const dayAfter = /^ +(?:[1-9]|[12]\d|3[01])(?:(?:st|nd|rd|th)\b|(?=[.,;:!?)]|\s*$|\s*[–—-]|\s+(?:\d{4}|at|and|or|to|through|till|until)\b))/i.test(rest)
+    const before = items[index - 1]
+    const beforeText = before && before.token.sentence === word.token.sentence && /^ +$/.test(text.slice(before.token.to, word.token.from)) ? lower(before) : ''
+    // ... "in may", "early march", "the 5th of may", "3rd march"
+    if (said === 'may' || said === 'march') return dayAfter || MONTH_AFTER.has(beforeText) || /^(?:[1-9]|[12]\d|3[01])(?:st|nd|rd|th)$/.test(beforeText)
+    // "sat 11/22", "wed nov 25"
+    const next = items[index + 1]
+    return /^ +\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(rest) || (!!next && next.token.kind === 'word' && /^ +$/.test(text.slice(word.token.to, next.token.from)) && MONTH_NAMES.has(next.token.text.toLowerCase()) && !DATE_WORDS[next.token.text.toLowerCase()])
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!
+    if (!isWord(item) || item.token.hyphenPart) continue
+    const date = DATE_WORDS[item.token.text]
+    if (date && isDate(i)) item.out = date
+  }
+
   for (let i = 0; i + 1 < items.length; i++) {
     const a = items[i]!
     const b = items[i + 1]!
@@ -116,8 +178,8 @@ export function correctText(text: string, speller: Speller, skip?: (from: number
     }
     // "want to loose" -> "want to lose"
     if (lower(b) === 'loose' && LOSE_AFTER.has(lower(a))) b.out = matchCase(b.token.text, 'lose')
-    // "its not" -> "it's not"
-    if (lower(a) === 'its' && ITS_BEFORE.has(lower(b))) a.out = matchCase(a.token.text, "it's")
+    // "its not" -> "it's not", "its hard to" -> "it's hard to"; never "its range", "its wild swings"
+    if (lower(a) === 'its' && itsIsItIs(i + 1)) a.out = matchCase(a.token.text, "it's")
     // "new York" -> "New York"
     if (a.out === 'new' && b.out === 'York') a.out = 'New'
   }

@@ -20,9 +20,9 @@
 }
 
 /*
- * A one-line field (title, quick note, caption) cannot draw underlines inside itself: a
- * transparent copy of its text lies exactly over it (SpellInput.tsx sets its box and font from
- * the field), showing only the wavy lines.
+ * A text field (title, caption, quick note, tag) cannot draw underlines inside itself: a
+ * transparent copy of its text lies exactly over it (SpellInput.tsx sets its box, font and line
+ * breaks from the field), showing only the wavy lines.
  */
 .spell-field {
   position: relative;
@@ -46,6 +46,38 @@
 }
 .spell-mirror-text {
   white-space: pre;
+}
+/*
+ * In the copy, the wave is drawn as a background of each word, line by line, not as a text
+ * decoration: a selection around the field (a picture picked in the note selects its caption's
+ * copy too) repaints the text and its decorations in the selection's colours, which would make
+ * the wave as transparent as the copy's text. A background is left as it is.
+ */
+.spell-mirror .spell-miss {
+  text-decoration: none;
+  /* The wave's bottom edge: 0.2em under the baseline plus its own height (SpellInput.tsx measures it per font). */
+  padding-bottom: var(--spell-drop, 0.12em);
+  background-color: var(--spell-line);
+  -webkit-mask: var(--spell-wave) left bottom / 6px 3px repeat-x;
+  mask: var(--spell-wave) left bottom / 6px 3px repeat-x;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.spell-mirror ::selection {
+  color: transparent;
+  background-color: transparent;
+}
+:root {
+  --spell-wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.5C1.5 2.5 1.5 0.5 3 0.5S4.5 2.5 6 2.5' fill='none' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E");
+}
+/* A field that wraps (the title, captions): the copy wraps the same way, line for line. */
+.spell-field.is-wrapping .spell-mirror {
+  display: block;
+  white-space: pre-wrap;
+}
+.spell-field.is-wrapping .spell-mirror-text {
+  display: block;
+  white-space: inherit;
 }
 .quick-note-field {
   display: flex;
