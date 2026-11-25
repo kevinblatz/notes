@@ -36,6 +36,34 @@ export async function crash(app: ElectronApplication): Promise<void> {
   const closed = app.waitForEvent('close', { timeout: 20_000 }).catch(() => undefined)
   killHard(app)
   await closed
+  await waitForExit(app)
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * Wait until the app's main process has really ended. Playwright reports "close" when the
+ * process it started ends and its output pipes close; on Windows that process is a cmd.exe
+ * wrapper, and on a busy machine the app's own main process was seen still shutting down after
+ * that, holding the single-instance lock on its data folder. A start on the same folder in that
+ * gap is refused by the lock and exits at once (code 0), which failed a restart test in CI. A
+ * quit that never finishes is reported as such instead of surfacing as a confusing failed start.
+ */
+async function waitForExit(app: ElectronApplication, timeoutMs = 60_000): Promise<void> {
+  const pid = mainPids.get(app)
+  if (typeof pid !== 'number') return
+  const deadline = Date.now() + timeoutMs
+  while (isAlive(pid)) {
+    if (Date.now() > deadline) throw new Error(`The app's main process (pid ${pid}) was still running ${timeoutMs / 1000} s after it quit`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
 }
 
 function killHard(app: ElectronApplication): void {
@@ -92,6 +120,7 @@ export async function launch(options: LaunchOptions = {}): Promise<Launched> {
     const closed = app.waitForEvent('close').catch(() => undefined)
     await app.evaluate(() => (globalThis as unknown as { __tnTest: { quit: () => Promise<void> } }).__tnTest.quit()).catch(() => undefined)
     await closed
+    await waitForExit(app)
   }
   return { app, page, dataDir, quit }
 }
