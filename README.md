@@ -54,11 +54,11 @@ ask for them with the shortcut.
 | **Ctrl + Shift + Space** (from any app) | Show or hide the notes. Change it in Settings. |
 | Click the tray icon | Show or hide the notes. Right-click for a quick note, a chart snapshot, dock side, always-on-top, opacity and Quit. |
 | Close button, or Alt + F4 | Hide to the tray. Your notes are saved first. |
-
-Hiding the notes (any of these ways) gives the keyboard back to the app you came from, so you
-can keep typing in Chrome without clicking it first.
 | Gear, then **Quit Trading Notes** | Actually exit. |
 | **Ctrl + ,** | Open Settings: hotkeys, dock side, always on top, opacity, start with Windows, candle chime, risk calculator defaults, theme, font and size. |
+
+Hiding the notes with the shortcut, the close button or Alt + F4 gives the keyboard back to the
+app you came from, so you can keep typing in Chrome without clicking it first.
 
 **Hotkeys for trading**
 

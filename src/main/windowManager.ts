@@ -29,17 +29,18 @@ import {
   type Rect,
   type SavedWindowState
 } from '@shared/windowBounds'
-import { foregroundApi, handleFromBuffer, previousWindowFromActivate, WM_ACTIVATE, type WindowHandle } from './foreground'
+import { appUsedLast, foregroundApi, handleFromBuffer, isReturnTarget, SHELL_CLASSES, type WindowHandle } from './foreground'
 import type { Library } from './store/library'
 
 export type ShowMode = 'focus' | 'inactive' | 'hidden'
 
 /**
- * How the notes gave the keyboard back: to the window noted when they took it ('returned', or
- * 'returned-activate' when it was noted from WM_ACTIVATE), by letting go below the
- * always-on-top band ('blur-below', Windows), or by letting go ('blur'). 'none': they did not have it.
+ * How the notes gave the keyboard back: to the window noted when they took it ('returned'),
+ * to the app used last when none was noted ('returned-below'), by letting go below the
+ * always-on-top band ('blur-below', Windows without user32), or by letting go ('blur').
+ * 'none': they did not have it.
  */
-export type KeyboardRelease = 'returned' | 'returned-activate' | 'blur-below' | 'blur' | 'none'
+export type KeyboardRelease = 'returned' | 'returned-below' | 'blur-below' | 'blur' | 'none'
 export type FlushOutcome = 'saved' | 'failed' | 'timeout' | 'unavailable'
 
 export interface WindowManagerOptions {
@@ -132,7 +133,7 @@ export class WindowManager {
    * Windows: the window that had the keyboard when the notes took it, to give it back to
    * (see foreground.ts). Forgotten as soon as the notes lose the keyboard.
    */
-  private returnTo: { hwnd: WindowHandle; noted: 'foreground' | 'activate' } | null = null
+  private returnTo: WindowHandle | null = null
   /** What the last hand-back of the keyboard did, for the tests and the diagnostics. */
   readonly keyboardRecord = { last: null as KeyboardRelease | null, count: 0 }
   private opacityPreview: number | null = null
@@ -201,15 +202,6 @@ export class WindowManager {
     win.webContents.on('will-navigate', (event) => event.preventDefault())
     win.webContents.on('will-attach-webview', (event) => event.preventDefault())
 
-    // Whoever had the keyboard before the notes were activated is the one to give it back to.
-    if (process.platform === 'win32') {
-      const own = handleFromBuffer(win.getNativeWindowHandle())
-      win.hookWindowMessage(WM_ACTIVATE, (wParam, lParam) => {
-        const previous = previousWindowFromActivate(wParam, lParam, own)
-        // A window noted just before a hotkey or the shortcut took the keyboard is kept.
-        if (previous !== null && this.returnTo === null) this.returnTo = { hwnd: previous, noted: 'activate' }
-      })
-    }
     // Once the keyboard has gone elsewhere, the window that had it before is no longer the one to go back to.
     win.on('blur', () => {
       this.returnTo = null
@@ -453,11 +445,12 @@ export class WindowManager {
   show(focus: boolean): void {
     const win = this.window
     if (!win) return
+    // The window that has the keyboard now gets it back when the notes are done with it.
+    // Noted before restore(), which activates a minimized window.
+    if (focus) this.noteForegroundWindow(win)
     if (win.isMinimized()) win.restore()
     if (!isUsablyVisible(win.getNormalBounds(), this.displays())) this.reconcileDisplays()
     if (focus) {
-      // The window that has the keyboard now gets it back when the notes are done with it.
-      this.noteForegroundWindow(win)
       // Asked for in order to type in them: the notes appear as they will be once they have
       // the keyboard, rather than see-through for a moment first.
       this.hasKeyboard = true
@@ -486,7 +479,10 @@ export class WindowManager {
     void this.requestFlush(1500)
     // On Windows a hidden window keeps the keyboard (Chromium hides without activating another
     // window), so typing would go into notes that cannot be seen. Hand it back first.
-    if (process.platform === 'win32') this.releaseKeyboard()
+    if (process.platform === 'win32') {
+      if (win.isFocused()) this.releaseKeyboard()
+      else this.passKeyboardOnFromShell()
+    }
     win.hide()
     this.options.onStatusChange()
   }
@@ -515,43 +511,74 @@ export class WindowManager {
    * Give the keyboard back to the app that had it before the notes took it (the chart,
    * usually), leaving the notes where they are. Does nothing unless the notes have it.
    *
-   * - On Windows, the window noted when the notes took the keyboard is activated directly.
-   * - Otherwise (nothing noted, that window has gone or is minimized, or user32 could not be
-   *   loaded) the notes let go with blur(), which on Windows activates the next visible window
-   *   below them. An always-on-top window steps out of the always-on-top band for that moment,
-   *   so that the next window is the app used last rather than the taskbar.
+   * - On Windows, the window noted when the notes took the keyboard is activated directly;
+   *   when none was noted (or it has gone), the app used last is (see foreground.ts).
+   * - Without user32 the notes let go with blur(), which on Windows activates the next visible
+   *   window below them. An always-on-top window steps out of the always-on-top band for that
+   *   moment, so that the next window is the app used last rather than the taskbar.
    */
   releaseKeyboard(): KeyboardRelease {
     const win = this.window
     if (!win || !win.isVisible() || !win.isFocused()) return 'none'
     const target = this.returnTo
     this.returnTo = null
-    let how: KeyboardRelease = 'blur'
+    let how: KeyboardRelease | null = null
     const api = foregroundApi()
-    if (api && target && api.usable(target.hwnd) && api.activate(target.hwnd)) {
-      how = target.noted === 'foreground' ? 'returned' : 'returned-activate'
-    } else if (process.platform === 'win32' && win.isAlwaysOnTop()) {
-      win.setAlwaysOnTop(false)
-      win.blur()
-      win.setAlwaysOnTop(true)
-      how = 'blur-below'
-    } else {
-      win.blur()
+    if (api) {
+      if (target !== null && isReturnTarget(api.describe(target), process.pid) && api.activate(target)) how = 'returned'
+      else {
+        const below = appUsedLast(api, process.pid)
+        if (below !== 0 && api.activate(below)) how = 'returned-below'
+      }
     }
+    if (how === null) {
+      if (process.platform === 'win32' && win.isAlwaysOnTop()) {
+        win.setAlwaysOnTop(false)
+        win.blur()
+        win.setAlwaysOnTop(true)
+        how = 'blur-below'
+      } else {
+        win.blur()
+        how = 'blur'
+      }
+    }
+    this.record(how)
+    return how
+  }
+
+  /**
+   * Hiding while the taskbar, the tray or one of this app's own windows (the tray menu) has
+   * the keyboard: pass it on to the app used last, where Windows allows it, rather than leave
+   * it with the taskbar or with a window that is about to disappear.
+   */
+  private passKeyboardOnFromShell(): void {
+    const api = foregroundApi()
+    const win = this.window
+    if (!api || !win) return
+    const current = api.current()
+    const info = api.describe(current)
+    if (!info) return
+    const own = handleFromBuffer(win.getNativeWindowHandle())
+    if (current === own || !(info.pid === process.pid || SHELL_CLASSES.has(info.className))) return
+    const below = appUsedLast(api, process.pid)
+    if (below !== 0 && api.activate(below)) this.record('returned-below')
+  }
+
+  private record(how: KeyboardRelease): void {
     this.keyboardRecord.last = how
     this.keyboardRecord.count++
     this.options.onKeyboardReleased?.(how)
-    return how
   }
 
   /** Windows: note the window in front now, as the one to give the keyboard back to. */
   private noteForegroundWindow(win: BrowserWindow): void {
-    if (win.isFocused()) return
+    if (win.isVisible() && !win.isMinimized() && win.isFocused()) return
     const api = foregroundApi()
     if (!api) return
     const current = api.current()
-    const own = handleFromBuffer(win.getNativeWindowHandle())
-    if (current !== 0 && current !== own) this.returnTo = { hwnd: current, noted: 'foreground' }
+    // The taskbar (a tray click, a pinned-icon launch) or one of this app's own windows is not
+    // where typing goes back to; the app used last is found when the time comes.
+    this.returnTo = current !== 0 && isReturnTarget(api.describe(current), process.pid) ? current : null
   }
 
   /** The notes window when it is visible and docked to a half of a display (snapshots cut it away). */

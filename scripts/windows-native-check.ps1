@@ -620,18 +620,30 @@ try {
   Chord "alt+f4"
   $hiddenByClose = WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000
   Check "Alt+F4 hides the window" ([bool]$hiddenByClose)
-  # The notes were clicked into, not brought forward by a hotkey: the window they note is the one
-  # Windows names as deactivated (or, failing that, the one below the always-on-top band).
+  # The second launch above brought the notes forward with the keyboard, so the window noted
+  # then (the chart) is the one that gets it back.
   $closedBack = WaitFor { if ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) { $true } } 3000
   $fg = [Native]::GetForegroundWindow()
   Check "Closing the notes gives the keyboard back to the chart" ([bool]$closedBack) ("foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
   Check "The app keeps running in the tray after the window is closed" (@(Get-Process -Name $appName -ErrorAction SilentlyContinue).Count -gt 0)
   Chord $Shortcut
   Check "The shortcut brings it back after closing" ([bool](WaitFor { if ([Native]::IsWindowVisible($notes)) { $true } } 4000))
+  # Clicked into rather than brought forward: no window was noted, so the keyboard goes to the
+  # app used last (the top ordinary window below the notes).
+  Start-Sleep -Milliseconds 600
+  Click $chartPoint[0] $chartPoint[1]
+  $nr = RectOf $notes
+  Click $centerX ($nr.Top + 12)
+  $clickedIn = WaitFor { if ([Native]::GetForegroundWindow() -eq $notes) { $true } } 3000
+  Chord $Shortcut
+  $hiddenAfterClick = WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000
+  $backAfterClick = WaitFor { if ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) { $true } } 3000
+  $fg = [Native]::GetForegroundWindow()
+  Check "Clicking into the notes and hiding them gives the keyboard back to the chart" ([bool]$clickedIn -and [bool]$hiddenAfterClick -and [bool]$backAfterClick) ("clicked in: $([bool]$clickedIn); foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
   Shot "09-final"
   # How each hand-back of the keyboard was done, as the app recorded it: 'returned' (to the
-  # window noted when a hotkey or the shortcut took the keyboard), 'returned-activate' (noted
-  # from Windows' activation message), 'blur-below' (let go below the always-on-top band).
+  # window noted when a hotkey or the shortcut took the keyboard), 'returned-below' (to the app
+  # used last, when none was noted), 'blur-below' (let go below the always-on-top band).
   $keyboardLog = "$diagnostics.keyboard.log"
   if (Test-Path $keyboardLog) {
     $hows = @(Get-Content $keyboardLog | ForEach-Object { try { ($_ | ConvertFrom-Json).how } catch { "?" } })

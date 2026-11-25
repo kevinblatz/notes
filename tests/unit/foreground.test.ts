@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { foregroundApi, foregroundStatus, handleFromBuffer, previousWindowFromActivate } from '../../src/main/foreground'
+import { appUsedLast, foregroundApi, foregroundStatus, handleFromBuffer, isOrdinaryAppWindow, isReturnTarget, type ForegroundApi, type WindowInfo } from '../../src/main/foreground'
 
-function pointer(value: number): Buffer {
-  const buffer = Buffer.alloc(8)
-  buffer.writeBigUInt64LE(BigInt(value))
-  return buffer
+const OWN = 4242
+
+function info(overrides: Partial<WindowInfo> = {}): WindowInfo {
+  return { visible: true, minimized: false, cloaked: false, pid: 9000, className: 'Chrome_WidgetWin_1', exStyle: 0x100, ...overrides }
 }
 
 describe('window handles from Electron buffers', () => {
   it('reads 64-bit and 32-bit handles', () => {
-    expect(handleFromBuffer(pointer(0x1a2b3c))).toBe(0x1a2b3c)
+    const wide = Buffer.alloc(8)
+    wide.writeBigUInt64LE(0x1a2b3cn)
+    expect(handleFromBuffer(wide)).toBe(0x1a2b3c)
     const small = Buffer.alloc(4)
     small.writeUInt32LE(0x00450a2e)
     expect(handleFromBuffer(small)).toBe(0x00450a2e)
@@ -17,19 +19,58 @@ describe('window handles from Electron buffers', () => {
   })
 })
 
-describe('the window active before the notes, from WM_ACTIVATE', () => {
-  const own = 0x5000
-  it('names the deactivated window when the notes are activated or click-activated', () => {
-    expect(previousWindowFromActivate(pointer(1), pointer(0x7000), own)).toBe(0x7000) // WA_ACTIVE
-    expect(previousWindowFromActivate(pointer(2), pointer(0x7000), own)).toBe(0x7000) // WA_CLICKACTIVE
-    // The high word of wParam carries the minimized state; only the low word is the kind.
-    expect(previousWindowFromActivate(pointer(0x0001_0001), pointer(0x7000), own)).toBe(0x7000)
+describe('where the keyboard may go back to', () => {
+  it('accepts an app window the user can see', () => {
+    expect(isReturnTarget(info(), OWN)).toBe(true)
+    // The desktop, if that is where the user was.
+    expect(isReturnTarget(info({ className: 'Progman', pid: 7000 }), OWN)).toBe(true)
   })
-  it('names nothing when the notes are deactivated, or no other window is named', () => {
-    expect(previousWindowFromActivate(pointer(0), pointer(0x7000), own)).toBeNull() // WA_INACTIVE
-    expect(previousWindowFromActivate(pointer(1), pointer(0), own)).toBeNull()
-    expect(previousWindowFromActivate(pointer(1), pointer(own), own)).toBeNull()
-    expect(previousWindowFromActivate(Buffer.alloc(0), pointer(0x7000), own)).toBeNull()
+  it('never the taskbar, the tray or its flyouts', () => {
+    for (const className of ['Shell_TrayWnd', 'Shell_SecondaryTrayWnd', 'NotifyIconOverflowWindow', 'TopLevelWindowForOverflowXamlIsland', 'XamlExplorerHostIslandWindow']) {
+      expect(isReturnTarget(info({ className, pid: 7000 }), OWN)).toBe(false)
+    }
+  })
+  it('never this app’s own windows (the tray menu, the notes)', () => {
+    expect(isReturnTarget(info({ pid: OWN }), OWN)).toBe(false)
+  })
+  it('never a window that cannot be seen or is gone', () => {
+    expect(isReturnTarget(null, OWN)).toBe(false)
+    expect(isReturnTarget(info({ visible: false }), OWN)).toBe(false)
+    expect(isReturnTarget(info({ minimized: true }), OWN)).toBe(false)
+    expect(isReturnTarget(info({ cloaked: true }), OWN)).toBe(false)
+    expect(isReturnTarget(info({ pid: 0 }), OWN)).toBe(false)
+  })
+})
+
+describe('the app used last', () => {
+  it('is an ordinary app window: not always-on-top, not a tool window, not the desktop', () => {
+    expect(isOrdinaryAppWindow(info(), OWN)).toBe(true)
+    expect(isOrdinaryAppWindow(info({ exStyle: 0x8 }), OWN)).toBe(false)
+    expect(isOrdinaryAppWindow(info({ exStyle: 0x80 }), OWN)).toBe(false)
+    // A tool window that asks to be on the taskbar counts.
+    expect(isOrdinaryAppWindow(info({ exStyle: 0x80 | 0x40000 }), OWN)).toBe(true)
+    expect(isOrdinaryAppWindow(info({ className: 'Progman' }), OWN)).toBe(false)
+    expect(isOrdinaryAppWindow(info({ className: 'Shell_TrayWnd' }), OWN)).toBe(false)
+  })
+  it('is the first one from the top of the z-order, past the notes, the taskbar and hidden windows', () => {
+    const windows = new Map<number, WindowInfo>([
+      [1, info({ pid: OWN, exStyle: 0x8 })], // the notes, always on top
+      [2, info({ className: 'Shell_TrayWnd', pid: 7000, exStyle: 0x8 | 0x80 })],
+      [3, info({ visible: false })],
+      [4, info({ cloaked: true, pid: 7100 })],
+      [5, info({ pid: 9000 })], // the chart
+      [6, info({ pid: 9100 })]
+    ])
+    const api: ForegroundApi = {
+      current: () => 1,
+      describe: (hwnd) => windows.get(hwnd) ?? null,
+      topDown: () => windows.keys(),
+      activate: () => true
+    }
+    expect(appUsedLast(api, OWN)).toBe(5)
+    windows.delete(5)
+    windows.delete(6)
+    expect(appUsedLast(api, OWN)).toBe(0)
   })
 })
 
@@ -38,8 +79,11 @@ describe('user32 access', () => {
     if (process.platform === 'win32') {
       expect(foregroundStatus()).toEqual({ available: true, error: null })
       const api = foregroundApi()!
-      expect(typeof api.current()).toBe('number')
-      expect(api.usable(0)).toBe(false)
+      const current = api.current()
+      expect(typeof current).toBe('number')
+      expect(api.describe(0)).toBeNull()
+      if (current !== 0) expect(typeof api.describe(current)?.className).toBe('string')
+      expect(typeof appUsedLast(api, process.pid)).toBe('number')
     } else {
       expect(foregroundApi()).toBeNull()
       expect(foregroundStatus()).toEqual({ available: false, error: null })
