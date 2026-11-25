@@ -12,9 +12,13 @@
     - clicking the notes window does give it focus (it is not click-through)
     - the global shortcut hides and shows the same single window
     - the trading hotkeys: Ctrl+Alt+N (quick note) takes the keyboard only while typing and then
-      gives it back to the chart, or hides the notes again when they were hidden; Ctrl+Alt+R
-      (risk calculator) copies the contract count and gives the keyboard back the same way;
-      Ctrl+Alt+S (snapshot) never takes the keyboard from the chart
+      gives it back to the chart for good (checked again a second later), or hides the notes
+      again when they were hidden, and the line typed is in today's session log in the notes
+      database; Ctrl+Alt+R (risk calculator) copies the contract count and gives the keyboard
+      back the same way; Ctrl+Alt+S (snapshot) never takes the keyboard from the chart and
+      stores one more image; Ctrl+Alt+O (see-through) changes the window's layered alpha and
+      back (reported for information). The database is read with Node's built-in node:sqlite,
+      read-only; without Node on PATH those database checks are reported for information.
     - clicking the tray icon hides and shows it (reported for information; locating the
       icon depends on the Windows version)
     - launching the app a second time does not create a second window
@@ -60,6 +64,7 @@ public static class Native {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int max);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int command);
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int x, int y, int w, int h, bool repaint);
+  [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr hWnd, out uint colorKey, out byte alpha, out uint flags);
 }
 "@
 [void][Native]::SetProcessDPIAware()
@@ -93,6 +98,14 @@ function ProcessNameOf([IntPtr]$hWnd) { try { (Get-Process -Id (ProcessIdOf $hWn
 function RectOf([IntPtr]$hWnd) { $r = New-Object Native+RECT; [void][Native]::GetWindowRect($hWnd, [ref]$r); $r }
 function RectText($r) { "{0},{1} {2}x{3}" -f $r.Left, $r.Top, ($r.Right - $r.Left), ($r.Bottom - $r.Top) }
 function IsTopmost([IntPtr]$hWnd) { ([Native]::GetWindowLongPtr($hWnd, -20).ToInt64() -band 0x8) -ne 0 }
+# Layered alpha, 0-255. Electron makes the window layered (WS_EX_LAYERED, LWA_ALPHA) the first
+# time it is see-through; a window that is not layered, or has no alpha set, is solid.
+function AlphaOf([IntPtr]$hWnd) {
+  if (([Native]::GetWindowLongPtr($hWnd, -20).ToInt64() -band 0x80000) -eq 0) { return 255 }
+  [uint32]$key = 0; [byte]$alpha = 255; [uint32]$flags = 0
+  if (-not [Native]::GetLayeredWindowAttributes($hWnd, [ref]$key, [ref]$alpha, [ref]$flags) -or ($flags -band 0x2) -eq 0) { return 255 }
+  return [int]$alpha
+}
 function RootAt([int]$x, [int]$y) { $p = New-Object Native+POINT; $p.X = $x; $p.Y = $y; [Native]::GetAncestor([Native]::WindowFromPoint($p), 2) }
 
 # Every visible top-level window whose title matches, optionally limited to one process name.
@@ -130,6 +143,8 @@ function TypeText([string]$text) {
   foreach ($ch in $text.ToUpper().ToCharArray()) { [Native]::keybd_event([byte][char]$ch, 0, 0, [UIntPtr]::Zero); [Native]::keybd_event([byte][char]$ch, 0, 0x2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40 }
   Start-Sleep -Milliseconds 400
 }
+# Lowercase letters only, so TypeText can type them and the notes database can be searched for them.
+function RandomLetters([int]$count) { -join (1..$count | ForEach-Object { [char](Get-Random -Minimum 97 -Maximum 123) }) }
 
 # Locate the app's notification-area (tray) icon with UI Automation. Returns its screen
 # rectangle, or $null. Tray icons belong to explorer.exe and are named after their tooltip.
@@ -179,6 +194,111 @@ function FindTrayIcon([string]$tooltip) {
   return $null
 }
 
+# The notes database, read the way the app stores it (src/main/store/db.ts): Node's built-in
+# SQLite, opened read-only, in a separate process without a window and with a time limit. The
+# probe prints one line of JSON: counts, and whether a word is in today's session log.
+$probeSource = @'
+// Written and run by scripts/windows-native-check.ps1, then deleted. Opens the Trading Notes
+// database read-only with Node's built-in SQLite and prints one line of JSON. Never writes.
+'use strict'
+let out
+try {
+  const { DatabaseSync } = require('node:sqlite')
+  const db = new DatabaseSync(process.env.TN_PROBE_DB, { readOnly: true })
+  try {
+    db.exec('PRAGMA busy_timeout = 3000')
+    const word = (process.env.TN_PROBE_WORD || '').toLowerCase()
+    const has = (text) => word !== '' && String(text || '').toLowerCase().includes(word)
+    const parse = (text) => {
+      try {
+        return JSON.parse(text)
+      } catch {
+        return null
+      }
+    }
+    // Images are "noteImage" nodes anywhere in a note's document (src/shared/content.ts).
+    const images = (node) => {
+      if (!node || typeof node !== 'object') return 0
+      const children = Array.isArray(node.content) ? node.content : []
+      return (node.type === 'noteImage' ? 1 : 0) + children.reduce((sum, child) => sum + images(child), 0)
+    }
+    // A session log carries its local date in extra_json.sessionLog (src/main/store/library.ts).
+    const isLog = (note) => {
+      const extra = parse(note.extra_json)
+      return !!extra && typeof extra.sessionLog === 'string'
+    }
+    const notes = db.prepare('SELECT plain_text, content_json, extra_json FROM notes WHERE deleted_at IS NULL').all()
+    const logs = notes.filter(isLog)
+    const others = notes.filter((note) => !isLog(note))
+    out = {
+      ok: true,
+      notes: notes.length,
+      attachments: Number(db.prepare('SELECT COUNT(*) AS n FROM attachments').get().n),
+      logNotes: logs.length,
+      logImages: logs.reduce((sum, note) => sum + images(parse(note.content_json)), 0),
+      inLogText: logs.some((note) => has(note.plain_text)),
+      inOtherText: others.filter((note) => has(note.plain_text)).length
+    }
+  } finally {
+    db.close()
+  }
+} catch (error) {
+  out = { ok: false, code: String((error && error.code) || ''), error: String((error && error.message) || error) }
+}
+process.stdout.write(JSON.stringify(out) + '\n')
+'@
+function RunProbe([string]$word) {
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $nodeExe
+  $psi.Arguments = "$script:nodeFlags `"$dbProbe`""
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.EnvironmentVariables["TN_PROBE_DB"] = $dbFile
+  $psi.EnvironmentVariables["TN_PROBE_WORD"] = $word
+  $proc = [System.Diagnostics.Process]::Start($psi)
+  try {
+    $stdout = $proc.StandardOutput.ReadToEndAsync(); $stderr = $proc.StandardError.ReadToEndAsync()
+    if (-not $proc.WaitForExit(10000)) { try { $proc.Kill() } catch { }; throw "node did not answer within 10 s" }
+    [void]$stdout.Wait(3000); [void]$stderr.Wait(3000)
+    $text = if ($stdout.IsCompleted) { $stdout.Result.Trim() } else { "" }
+    if (-not $text) { throw ("node printed nothing (exit {0}): {1}" -f $proc.ExitCode, $(if ($stderr.IsCompleted) { $stderr.Result.Trim() } else { "" })) }
+    return ($text | ConvertFrom-Json)
+  } finally { $proc.Dispose() }
+}
+# The probe's answer, or $null when the database could not be read ($probeProblem says why).
+function DbProbe([string]$word = "") {
+  $problem = ""; $answer = $null
+  try {
+    if (-not $nodeExe) { throw "node.exe was not found on PATH" }
+    $answer = RunProbe $word
+    # Node 22 before 22.13 has node:sqlite only behind a flag.
+    if (-not $answer.ok -and $answer.code -eq "ERR_UNKNOWN_BUILTIN_MODULE" -and $script:nodeFlags -notmatch "experimental-sqlite") {
+      $script:nodeFlags = "$script:nodeFlags --experimental-sqlite"
+      $answer = RunProbe $word
+    }
+    if (-not $answer.ok) { throw ("{0} {1}" -f $answer.code, $answer.error) }
+  } catch { $problem = "$_"; $answer = $null }
+  if ($problem -and $problem -ne $script:probeProblem) { Say "  (notes database probe: $problem)" }
+  $script:probeProblem = $problem
+  return $answer
+}
+function ProbeText($answer, [string]$word = "") {
+  if (-not $answer) { return ("the notes database could not be read: " + $script:probeProblem) }
+  $text = "{0} notes, {1} session log(s), {2} attachment(s), {3} image(s) in the log" -f $answer.notes, $answer.logNotes, $answer.attachments, $answer.logImages
+  if ($word) { $text = ("'{0}' in today's log: {1}, in other notes: {2}; " -f $word, $answer.inLogText, $answer.inOtherText) + $text }
+  return $text
+}
+# Required when the database can be read, reported otherwise: the line typed with this word is
+# in today's session log, and in no other note (so it never went into a note open underneath).
+function LogLineCheck([string]$name, [string]$word) {
+  if (-not $dbReadable) { Check $name $false (ProbeText $null) $false; return }
+  $found = WaitFor { $answer = DbProbe $word; if ($answer -and $answer.inLogText) { $answer } } 8000
+  $last = if ($found) { $found } else { DbProbe $word }
+  Check $name ([bool]$found -and $found.inOtherText -eq 0) (ProbeText $last $word)
+}
+
 $AppExe = (Resolve-Path $AppExe).Path
 $appName = [System.IO.Path]::GetFileNameWithoutExtension($AppExe)
 $dataDir = Join-Path ([System.IO.Path]::GetTempPath()) ("tn-native-" + [guid]::NewGuid().ToString("N"))
@@ -190,6 +310,16 @@ $work = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 Say "Screen $($screen.Width)x$($screen.Height), work area $($work.X),$($work.Y) $($work.Width)x$($work.Height)"
 Say "App: $AppExe"
+# The notes database for the hotkey checks (the start-up report names the exact folder).
+$dbFile = Join-Path (Join-Path $dataDir "library") "notes.db"
+$dbProbe = Join-Path ([System.IO.Path]::GetTempPath()) ("tn-dbprobe-" + [guid]::NewGuid().ToString("N") + ".cjs")
+$dbReadable = $false
+$probeProblem = ""
+$nodeFlags = "--no-warnings"
+$nodeCommand = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+$nodeExe = if ($nodeCommand) { $nodeCommand.Path } else { $null }
+try { [System.IO.File]::WriteAllText($dbProbe, $probeSource) } catch { Say "  (could not write the database probe: $_)"; $nodeExe = $null }
+Say ("Node: " + $(if ($nodeExe) { $nodeExe } else { "not found; the notes database checks are reported for information only" }))
 
 $chrome = $null
 try {
@@ -210,10 +340,16 @@ try {
     Check "Tray icon was created" ([bool]$report.tray.created)
     Check "Tray icon image loaded from the packaged app" ([bool]$report.tray.iconLoaded)
     Check "Global shortcut registered with Windows" ([bool]$report.shortcut.registered) ("{0} {1}" -f $report.shortcut.accelerator, $report.shortcut.error)
-    if ($report.hotkeys) {
-      $missing = @($report.hotkeys.PSObject.Properties | Where-Object { -not $_.Value.registered } | ForEach-Object { "{0} {1} {2}" -f $_.Name, $_.Value.accelerator, $_.Value.error })
+    # Every hotkey is in the report (show/hide and the six trading hotkeys), each registered.
+    $expectedHotkeys = @("toggle", "quickNote", "snapshot", "risk", "candleTimer", "seeThrough", "openLog")
+    $hotkeyReport = if ($report.PSObject.Properties["hotkeys"]) { $report.hotkeys } else { $null }
+    $unreported = @($expectedHotkeys | Where-Object { -not $hotkeyReport -or -not $hotkeyReport.PSObject.Properties[$_] })
+    Check "App reports all $($expectedHotkeys.Count) hotkeys" ($unreported.Count -eq 0) ($(if ($unreported.Count -gt 0) { "not reported: " + ($unreported -join ", ") } else { "" }))
+    if ($hotkeyReport) {
+      $missing = @($hotkeyReport.PSObject.Properties | Where-Object { -not $_.Value.registered } | ForEach-Object { "{0} {1} {2}" -f $_.Name, $_.Value.accelerator, $_.Value.error })
       Check "Trading hotkeys registered with Windows" ($missing.Count -eq 0) ($missing -join "; ")
     }
+    if ($report.PSObject.Properties["dataDir"] -and $report.dataDir) { $dbFile = Join-Path $report.dataDir "notes.db" }
   }
 
   $rect = RectOf $notes
@@ -344,6 +480,12 @@ try {
   # The notes take the keyboard only while a typing hotkey is open, then give it back. If the
   # hand-back check fails with the taskbar in the foreground, WindowManager.giveKeyboardBack()
   # is the one function to change (minimize() + showInactive() instead of blur()).
+  # Each quick note carries a word of its own, so the notes database can be searched for it.
+  $firstProbe = DbProbe
+  $dbReadable = $null -ne $firstProbe
+  Check "Notes database readable with Node's node:sqlite (for the hotkey checks)" $dbReadable ($(if ($dbReadable) { "$dbFile; " + (ProbeText $firstProbe) } else { ProbeText $null })) $false
+  $quickWord = "tnq" + (RandomLetters 8)
+  $hiddenWord = "tnh" + (RandomLetters 8)
   $cr = RectOf $chrome
   $chartPoint = @(($cr.Left + 150), ($cr.Top + [int](($cr.Bottom - $cr.Top) / 2)))
   Click $chartPoint[0] $chartPoint[1]
@@ -352,26 +494,40 @@ try {
   $took = WaitFor { if ([Native]::GetForegroundWindow() -eq $notes) { $true } } 4000
   Check "Quick note (Ctrl+Alt+N) brings the keyboard to the notes" ([bool]$took)
   Shot "10-quick-note-open"
-  TypeText "native quick note"
+  TypeText "native $quickWord"
   Chord "enter"
   $back = WaitFor { if ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) { $true } } 4000
   $fg = [Native]::GetForegroundWindow()
   Check "Quick note gives the keyboard back to the chart" ([bool]$back) ("foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
   Check "Notes stay visible and on top after a quick note" ([Native]::IsWindowVisible($notes) -and (IsTopmost $notes))
+  # Not just for a moment: the notes do not take the keyboard back, and they stay on screen.
+  Start-Sleep -Milliseconds 1000
+  $fg = [Native]::GetForegroundWindow()
+  Check "A second after the quick note the chart still has the keyboard and the notes are visible" (((ProcessNameOf $fg) -eq $browserName) -and [Native]::IsWindowVisible($notes) -and -not [Native]::IsIconic($notes)) ("foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
+  Check "The quick note's typing went to the notes, not to the chart" ((Title $chrome) -notmatch $quickWord) ("chart window title: '" + (Title $chrome) + "'")
   Shot "11-quick-note-done"
+  LogLineCheck "The quick note is stored in today's session log (notes database)" $quickWord
 
   # From hidden notes: they show for the quick note and hide again afterwards.
   Chord $Shortcut
-  [void](WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000)
+  $hiddenFirst = WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000
+  Check "The shortcut hides the notes before the hidden quick note" ([bool]$hiddenFirst)
   Click $chartPoint[0] $chartPoint[1]
   Chord "ctrl+alt+n"
   $shownForNote = WaitFor { if ([Native]::IsWindowVisible($notes) -and [Native]::GetForegroundWindow() -eq $notes) { $true } } 4000
   Check "Quick note shows hidden notes with the keyboard" ([bool]$shownForNote)
-  TypeText "from hidden"
+  Shot "11b-quick-note-from-hidden"
+  TypeText "from hidden $hiddenWord"
   Chord "enter"
   $rehidden = WaitFor { if (-not [Native]::IsWindowVisible($notes)) { $true } } 4000
   Check "Quick note hides the notes again when they were hidden" ([bool]$rehidden)
-  Check "The chart has the keyboard after the hidden quick note" ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) ("foreground: '" + (Title ([Native]::GetForegroundWindow())) + "'")
+  $hiddenBack = WaitFor { if ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) { $true } } 4000
+  Check "The chart has the keyboard after the hidden quick note" ([bool]$hiddenBack) ("foreground: '" + (Title ([Native]::GetForegroundWindow())) + "'")
+  Start-Sleep -Milliseconds 1000
+  $fg = [Native]::GetForegroundWindow()
+  Check "A second later the notes are still hidden and the chart still has the keyboard" ((-not [Native]::IsWindowVisible($notes)) -and ((ProcessNameOf $fg) -eq $browserName)) ("foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
+  Check "The hidden quick note's typing went to the notes, not to the chart" ((Title $chrome) -notmatch $hiddenWord) ("chart window title: '" + (Title $chrome) + "'")
+  LogLineCheck "The quick note typed from hidden notes is stored in today's session log" $hiddenWord
   Chord $Shortcut
   [void](WaitFor { if ([Native]::IsWindowVisible($notes)) { $true } } 4000)
   Click $chartPoint[0] $chartPoint[1]
@@ -390,15 +546,43 @@ try {
   $riskBack = WaitFor { if ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName) { $true } } 4000
   Check "Risk calculator gives the keyboard back to the chart" ([bool]$riskBack) ("foreground: '" + (Title ([Native]::GetForegroundWindow())) + "'")
 
-  # Snapshot: captured without the notes ever taking the keyboard.
+  # Snapshot: captured without the notes ever taking the keyboard, and stored like a pasted
+  # screenshot: one more attachment in the database, and an image in today's log.
+  $snapBefore = if ($dbReadable) { DbProbe } else { $null }
   $stolen = $false
   Chord "ctrl+alt+s"
   for ($i = 0; $i -lt 15; $i++) { if ([Native]::GetForegroundWindow() -eq $notes) { $stolen = $true }; Start-Sleep -Milliseconds 100 }
   Check "Snapshot (Ctrl+Alt+S) leaves the keyboard with the chart" ((-not $stolen) -and ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName))
   Shot "13-after-snapshot"
-  # See-through on and off again, also without taking the keyboard.
-  Chord "ctrl+alt+o"; Start-Sleep -Milliseconds 400; Chord "ctrl+alt+o"
-  Check "See-through (Ctrl+Alt+O) leaves the keyboard with the chart" ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName)
+  if ($snapBefore) {
+    $snapStored = WaitFor { $answer = DbProbe; if ($answer -and ($answer.attachments -gt $snapBefore.attachments -or $answer.logImages -gt $snapBefore.logImages)) { $answer } } 10000
+    $snapAfter = if ($snapStored) { $snapStored } else { DbProbe }
+    Check "Snapshot is stored in the notes database (one more image)" ($null -ne $snapStored) ("before: " + (ProbeText $snapBefore) + "; after: " + (ProbeText $snapAfter))
+    if ($snapStored) {
+      $snapLogged = WaitFor { $answer = DbProbe; if ($answer -and $answer.logImages -gt $snapBefore.logImages) { $answer } } 6000
+      Check "Snapshot appears in today's session log" ($null -ne $snapLogged) (ProbeText $(if ($snapLogged) { $snapLogged } else { DbProbe })) $false
+    }
+  } else {
+    Check "Snapshot is stored in the notes database (one more image)" $false (ProbeText $null) $false
+  }
+  $fg = [Native]::GetForegroundWindow()
+  Check "The chart still has the keyboard once the snapshot is stored" ((ProcessNameOf $fg) -eq $browserName) ("foreground: '" + (Title $fg) + "' [" + (ProcessNameOf $fg) + "]")
+  # See-through on and off again, also without taking the keyboard. Reported only, as the
+  # alpha is read from Windows' layered-window state, which Electron owns.
+  $alphaBefore = AlphaOf $notes
+  Chord "ctrl+alt+o"
+  $wentSeeThrough = WaitFor { if ((AlphaOf $notes) -lt 255) { $true } } 3000
+  Start-Sleep -Milliseconds 300
+  $alphaSeeThrough = AlphaOf $notes
+  $keptAfterFirst = (ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName
+  Shot "14-see-through"
+  Chord "ctrl+alt+o"
+  $solidAgain = WaitFor { if ((AlphaOf $notes) -ge 255) { $true } } 3000
+  $alphaAfter = AlphaOf $notes
+  Check "See-through (Ctrl+Alt+O) changes the notes' opacity, and pressing it again makes them solid" ([bool]$wentSeeThrough -and [bool]$solidAgain) ("layered alpha $alphaBefore -> $alphaSeeThrough -> $alphaAfter") $false
+  # Leave the notes solid for the steps below, whichever press did not arrive.
+  if (-not $solidAgain) { Chord "ctrl+alt+o"; [void](WaitFor { if ((AlphaOf $notes) -ge 255) { $true } } 3000) }
+  Check "See-through (Ctrl+Alt+O) leaves the keyboard with the chart" ($keptAfterFirst -and ((ProcessNameOf ([Native]::GetForegroundWindow())) -eq $browserName))
   Check "Still exactly one notes window after the hotkeys" ((FindWindows "^Trading Notes$" $appName).Count -eq 1)
 
   # ---------------------------------------------------------------- second launch, close button
@@ -426,7 +610,7 @@ finally {
   Get-Process -Name $appName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   if ($chrome) { try { Stop-Process -Id (ProcessIdOf $chrome) -Force -ErrorAction SilentlyContinue } catch {} }
   Start-Sleep -Seconds 1
-  Remove-Item -Recurse -Force $dataDir, $chromeProfile -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force $dataDir, $chromeProfile, $dbProbe -ErrorAction SilentlyContinue
   $results | ConvertTo-Json | Set-Content (Join-Path $OutDir "native-check.json")
 }
 
