@@ -293,7 +293,7 @@ npm ci
 | `npm run typecheck` | Type-check main process, window and tests. |
 | `npm test` | Unit tests: layout rules, storage, backup, search, window placement. |
 | `npm run build` | Production build into `out/`. |
-| `npm run test:e2e` | Build, then drive the real app through the acceptance checks (Playwright). On Linux run it under `xvfb-run -a`. |
+| `npm run test:e2e` | Build, then drive the real app through the acceptance checks (Playwright). On Linux run it under `xvfb-run -a --server-args="-screen 0 1920x1080x24"`: some checks need a full-size screen. |
 | `npm run package:win` | Build the Windows installer and portable app into `release/`. |
 | `npm run icons` | Regenerate the icons from the SVG in `scripts/make-icons.cjs`. |
 | `pwsh scripts/windows-native-check.ps1` | On Windows, after packaging: verify always-on-top, focus and shortcut behaviour against a real Chrome window. |
