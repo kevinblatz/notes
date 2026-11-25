@@ -18,6 +18,16 @@ import { appNow, getState, setState } from './store'
 /** Where the keyboard was inside the window when a typing hotkey opened its panel. */
 let returnFocusTo: Element | null = null
 
+/**
+ * Set by the open quick note strip: adds what it holds to today's log (or just closes it when
+ * it is empty). Resolves false when the write failed; the strip then keeps the text.
+ */
+let flushQuickNote: (() => Promise<boolean>) | null = null
+
+export function registerQuickNoteFlush(flush: (() => Promise<boolean>) | null): void {
+  flushQuickNote = flush
+}
+
 export function handleHotkey(event: HotkeyEvent): void {
   if (event.action === 'quickNote' || event.action === 'risk') {
     const current = getState().capture
@@ -32,14 +42,21 @@ export function handleHotkey(event: HotkeyEvent): void {
     // hotkey must land in the strip, never in a note open underneath.
     flushSync(() => setState({ capture: { kind: event.action, token: event.token, at: event.at, presses: current ? current.presses + 1 : 1 } }))
   } else if (event.action === 'openLog') {
-    // The main process has already ended any typing session: the keyboard stays here now.
-    returnFocusTo = null
-    setState({ capture: null })
-    void openSessionLog(event.at).catch((error) => toast(`Today’s log could not be opened. ${cleanMessage(error)}`, { kind: 'error', duration: 9000 }))
+    void openLogFromHotkey(event.at)
   } else if (event.action === 'seeThrough') {
     flashOpacityReadout()
     announce(event.opacity < 1 ? `See-through, ${formatOpacity(event.opacity)}` : 'Solid')
   }
+}
+
+async function openLogFromHotkey(at: number): Promise<void> {
+  // Text waiting in the quick note strip goes into the log first, so it is never thrown away.
+  // If that write fails, the strip stays open with the text and the error.
+  if (getState().capture?.kind === 'quickNote' && flushQuickNote && !(await flushQuickNote())) return
+  // The main process has already ended any typing session: the keyboard stays here now.
+  returnFocusTo = null
+  setState({ capture: null })
+  await openSessionLog(at).catch((error) => toast(`Today’s log could not be opened. ${cleanMessage(error)}`, { kind: 'error', duration: 9000 }))
 }
 
 /** Put the keyboard back where it was in the window: the caret in the note, a button, or nowhere. */

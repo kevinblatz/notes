@@ -25,7 +25,7 @@ import {
 import { clockTime } from '@shared/sessionLog'
 import { useEscape } from '../lib/escape'
 import { updatePreferences } from '../state/actions'
-import { copyContractsAndClose, endCapture, submitQuickNote } from '../state/hotkeys'
+import { copyContractsAndClose, endCapture, registerQuickNoteFlush, submitQuickNote } from '../state/hotkeys'
 import { cleanMessage } from '../state/saver'
 import { useStore, type CaptureState } from '../state/store'
 import { Segmented } from './ui'
@@ -100,20 +100,39 @@ function QuickNoteStrip({ capture }: { capture: CaptureState }) {
     if (!busy) endCapture()
   })
 
-  const submit = async (event?: FormEvent): Promise<void> => {
+  const textNow = useRef(text)
+  textNow.current = text
+  const inFlight = useRef<Promise<boolean> | null>(null)
+
+  /** Adds the line (one write at a time); resolves false if it could not be written. */
+  const submit = (event?: FormEvent): Promise<boolean> => {
     event?.preventDefault()
-    if (busy) return
+    if (inFlight.current) return inFlight.current
     setBusy(true)
     setError(null)
-    try {
-      if (await submitQuickNote(text)) setText('')
-    } catch (failure) {
-      setError(`Not added yet: ${cleanMessage(failure)} Your text is still here; press Enter to try again.`)
-    } finally {
-      setBusy(false)
-      input.current?.focus({ preventScroll: true })
-    }
+    const run = (async () => {
+      try {
+        if (await submitQuickNote(textNow.current)) setText('')
+        return true
+      } catch (failure) {
+        setError(`Not added yet: ${cleanMessage(failure)} Your text is still here; press Enter to try again.`)
+        return false
+      } finally {
+        inFlight.current = null
+        setBusy(false)
+        input.current?.focus({ preventScroll: true })
+      }
+    })()
+    inFlight.current = run
+    return run
   }
+  const submitNow = useRef(submit)
+  submitNow.current = submit
+  // Opening today's log by its hotkey adds what is in the strip first.
+  useEffect(() => {
+    registerQuickNoteFlush(() => submitNow.current())
+    return () => registerQuickNoteFlush(null)
+  }, [])
 
   return (
     <Layer label="Quick note" onOutside={() => (text.trim() ? input.current?.focus() : endCapture())}>

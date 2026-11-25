@@ -305,6 +305,19 @@ test('a quick note goes in through the editor when the log itself is open, keepi
   expect(await logLines(app)).toEqual(['11:00:00 — one', 'typing here!', '11:02:00 — two'])
 })
 
+test('opening today’s log while the strip holds text adds that text first', async () => {
+  const { app, page } = await start()
+  await pressAt(app, 'quickNote', at(25, 10, 30, 0))
+  await expect(stripInput(page)).toBeFocused()
+  await page.keyboard.type('not thrown away')
+  await pressAt(app, 'openLog', at(25, 10, 31, 0))
+  await expect(strip(page)).toBeHidden()
+  await expect(focusView(page)).toBeVisible()
+  await expect(page.locator('.focus-title')).toHaveValue(/^Session log · /)
+  await expect(editorBody(page).locator('p')).toHaveText(['10:30:00 — not thrown away'])
+  expect(await logLines(app)).toEqual(['10:30:00 — not thrown away'])
+})
+
 test('the strip keeps its keys over a drawing and stays in sight over the image preview', async () => {
   const { app, page } = await start()
   await clickEmptySpace(page)
