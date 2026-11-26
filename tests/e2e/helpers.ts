@@ -1,5 +1,5 @@
 import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test'
-import { deflateSync } from 'node:zlib'
+import { deflateSync, inflateSync } from 'node:zlib'
 
 export const board = (page: Page): Locator => page.getByTestId('board')
 export const notes = (page: Page): Locator => page.locator('.board > .note')
@@ -157,6 +157,82 @@ export function makePng(width: number, height: number, rgb: [number, number, num
     }
   }
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', new Uint8Array())])
+}
+
+type Rgb = [number, number, number]
+
+/**
+ * A real PNG in flat colours, painted by `colourAt(x, y)`: for telling apart, in a captured
+ * picture, which part of a window it came from.
+ */
+export function makePaintedPng(width: number, height: number, colourAt: (x: number, y: number) => Rgb): Buffer {
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(width, 0)
+  ihdr.writeUInt32BE(height, 4)
+  ihdr[8] = 8
+  ihdr[9] = 2
+  const raw = Buffer.alloc((1 + width * 3) * height)
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * (1 + width * 3)
+    for (let x = 0; x < width; x++) raw.set(colourAt(x, y), rowStart + 1 + x * 3)
+  }
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', new Uint8Array())])
+}
+
+/**
+ * Decode an 8-bit, non-interlaced PNG (RGB, RGBA, grey or grey with alpha), as the app stores
+ * them, into its size and a way to read the colour of any pixel.
+ */
+export function readPng(png: Buffer): { width: number; height: number; rgbAt: (x: number, y: number) => Rgb } {
+  if (png.subarray(1, 4).toString('ascii') !== 'PNG') throw new Error('Not a PNG')
+  let offset = 8
+  let width = 0
+  let height = 0
+  let channels = 0
+  const data: Buffer[] = []
+  while (offset < png.length) {
+    const length = png.readUInt32BE(offset)
+    const type = png.subarray(offset + 4, offset + 8).toString('ascii')
+    const body = png.subarray(offset + 8, offset + 8 + length)
+    if (type === 'IHDR') {
+      width = body.readUInt32BE(0)
+      height = body.readUInt32BE(4)
+      if (body[8] !== 8 || body[12] !== 0) throw new Error('Only 8-bit, non-interlaced PNGs are read here')
+      channels = ({ 0: 1, 2: 3, 4: 2, 6: 4 } as Record<number, number>)[body[9]!] ?? 0
+      if (!channels) throw new Error(`PNG colour type ${body[9]} is not read here`)
+    } else if (type === 'IDAT') data.push(body)
+    offset += 12 + length
+  }
+  const raw = inflateSync(Buffer.concat(data))
+  const stride = width * channels
+  const pixels = Buffer.alloc(stride * height)
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)]!
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1))
+    for (let i = 0; i < stride; i++) {
+      const left = i >= channels ? pixels[y * stride + i - channels]! : 0
+      const up = y > 0 ? pixels[(y - 1) * stride + i]! : 0
+      const upLeft = y > 0 && i >= channels ? pixels[(y - 1) * stride + i - channels]! : 0
+      let predicted = 0
+      if (filter === 1) predicted = left
+      else if (filter === 2) predicted = up
+      else if (filter === 3) predicted = (left + up) >> 1
+      else if (filter === 4) {
+        const p = left + up - upLeft
+        const [pa, pb, pc] = [Math.abs(p - left), Math.abs(p - up), Math.abs(p - upLeft)]
+        predicted = pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft
+      }
+      pixels[y * stride + i] = (line[i]! + predicted) & 0xff
+    }
+  }
+  return {
+    width,
+    height,
+    rgbAt: (x, y) => {
+      const at = y * stride + x * channels
+      return channels >= 3 ? [pixels[at]!, pixels[at + 1]!, pixels[at + 2]!] : [pixels[at]!, pixels[at]!, pixels[at]!]
+    }
+  }
 }
 
 /** Put an image on the system clipboard, as a screenshot tool would. */

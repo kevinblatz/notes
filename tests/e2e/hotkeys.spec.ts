@@ -7,15 +7,17 @@
  * presses, the hand-back of the keyboard to Chrome and real screen capture are checked on
  * Windows by scripts/windows-native-check.ps1.
  */
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { expect, test } from './fixtures'
-import { clickEmptySpace, collectConsoleErrors, editorBody, focusView, makePng, windowCount } from './helpers'
+import { clickEmptySpace, collectConsoleErrors, editorBody, focusView, makePaintedPng, makePng, readPng, windowCount } from './helpers'
 import { launch, removeDataDir, type Launched, type LaunchOptions } from './launch'
 
 type HotkeyId = 'toggle' | 'quickNote' | 'snapshot' | 'risk' | 'candleTimer' | 'seeThrough' | 'openLog'
 interface Status { id: HotkeyId; accelerator: string; enabled: boolean; registered: boolean; error: string | null }
+interface Box { x: number; y: number; width: number; height: number }
+interface CropReport { method: 'page' | 'none'; reason: string | null; rect: Box | null; picture: { width: number; height: number }; frame: Box | null; pages: Box[] }
 interface StoredNote { id: string; title: string | null; plainText: string; content: { content?: Array<{ type: string; attrs?: Record<string, unknown> }> }; extra: Record<string, unknown>; revision: number }
 interface Handle {
   library: {
@@ -26,10 +28,14 @@ interface Handle {
   }
   windows: { hide: () => void; isShown: () => boolean }
   shortcuts: { trigger: (id: HotkeyId) => boolean; statuses: () => Record<HotkeyId, Status> }
-  hotkeys: { record: { lastHandBack: string | null; lastCapture: { from: string; title: string | null } | null; snapshots: number } }
+  hotkeys: { record: { lastHandBack: string | null; lastCapture: { from: string; title: string | null } | null; lastCrop: CropReport | null; snapshots: number } }
   candles: { state: () => { on: boolean; minutes: number; nextCloseAt: number | null; closes: number; lastCloseAt: number | null } }
   tray: { testMenu: () => Array<{ label: string }>; testChoose: (...labels: string[]) => boolean; testTooltip: () => string } | null
-  testHooks: { desktopSources: Array<{ id: string; name: string; display_id?: string; png: string }> | null; captureError: string | null }
+  testHooks: {
+    desktopSources: Array<{ id: string; name: string; display_id?: string; png: string }> | null
+    captureError: string | null
+    windowGeometry: Record<string, { frame: Box; pages: Box[] }> | null
+  }
   setNow: (ms: number) => void
 }
 const handle = (): Handle => (globalThis as unknown as { __tnTest: Handle }).__tnTest
@@ -467,6 +473,88 @@ test('snapshot: the chart window goes into today’s log as a managed image, wit
   await expect(page.locator('.toast.is-error')).toContainText('permission was denied')
   expect((await sessionLogs(app))[0]!.content.content!.filter((block) => block.type === 'noteImage')).toHaveLength(2)
   expect(await focusEvents(app)).toBe(0)
+})
+
+test('snapshot of a browser window keeps only the web page: its tabs, address bar and side panel are cut away', async () => {
+  const { app, page, dataDir } = await start()
+  type Rgb = [number, number, number]
+  const BAR: Rgb = [222, 225, 230] // the browser's tab strip, address bar and bookmarks bar
+  const PANEL: Rgb = [250, 200, 40] // a side panel beside the page
+  const PAGE: Rgb = [19, 23, 34] // TradingView's dark background, #131722
+  const TITLE = 'ES1! 6,123.25 ▲ +0.35% Unnamed - Google Chrome'
+  // The window's picture: the browser's bars across the top 90 rows, a side panel 240 wide on
+  // the right, the page in the rest. Windows says the same in physical pixels: the visible frame
+  // at 100,50 and two page windows, the page and (smaller) the side panel.
+  const windowPng = (scale: number): string =>
+    makePaintedPng(1000 * scale, 800 * scale, (x, y) => (y < 90 * scale ? BAR : x >= 760 * scale ? PANEL : PAGE)).toString('base64')
+  const geometry = { frame: { x: 100, y: 50, width: 1000, height: 800 }, pages: [{ x: 100, y: 140, width: 760, height: 710 }, { x: 860, y: 140, width: 240, height: 710 }] }
+  const setWindow = (png: string, withGeometry: boolean): Promise<void> =>
+    app.evaluate(
+      (_electron, input) => {
+        const hooks = (globalThis as unknown as { __tnTest: Handle }).__tnTest.testHooks
+        hooks.desktopSources = [
+          { id: 'window:7:0', name: 'Inbox - Mail', png: input.png },
+          { id: 'window:42:0', name: input.title, png: input.png }
+        ]
+        hooks.windowGeometry = input.geometry
+      },
+      { png, title: TITLE, geometry: withGeometry ? { 'window:42:0': geometry } : null }
+    )
+  const logImages = async () => (await sessionLogs(app))[0]?.content.content?.filter((block) => block.type === 'noteImage') ?? []
+  const stored = (image: { attrs?: Record<string, unknown> }) => readPng(readFileSync(join(dataDir, 'library', 'attachments', `${String(image.attrs!.attachmentId)}.png`)))
+  const lastCrop = (): Promise<CropReport | null> => app.evaluate(() => (globalThis as unknown as { __tnTest: Handle }).__tnTest.hotkeys.record.lastCrop)
+  /** Every pixel along the four edges, and every tenth one inside, has this colour. */
+  const allOf = (picture: ReturnType<typeof readPng>, colour: Rgb): string[] => {
+    const wrong: string[] = []
+    const look = (x: number, y: number): void => {
+      const seen = picture.rgbAt(x, y)
+      if (seen.some((value, i) => value !== colour[i])) wrong.push(`${x},${y}: ${seen.join(',')}`)
+    }
+    for (let x = 0; x < picture.width; x++) [0, picture.height - 1].forEach((y) => look(x, y))
+    for (let y = 0; y < picture.height; y++) [0, picture.width - 1].forEach((x) => look(x, y))
+    for (let y = 5; y < picture.height; y += 10) for (let x = 5; x < picture.width; x += 10) look(x, y)
+    return wrong.slice(0, 5)
+  }
+
+  await setWindow(windowPng(1), true)
+  await focusOtherApp(app)
+  await pressAt(app, 'snapshot', at(25, 11, 0, 0))
+  await expect.poll(async () => (await logImages()).length).toBe(1)
+  const first = (await logImages())[0]!
+  expect(first.attrs).toMatchObject({ caption: '11:00:00 · ES1! 6,123.25', naturalWidth: 760, naturalHeight: 710 })
+  const kept = stored(first)
+  expect({ width: kept.width, height: kept.height }).toEqual({ width: 760, height: 710 })
+  // Its top row is the page, not the browser's bar; nothing of the side panel either.
+  expect(kept.rgbAt(0, 0)).toEqual(PAGE)
+  expect(kept.rgbAt(759, 0)).toEqual(PAGE)
+  expect(allOf(kept, PAGE)).toEqual([])
+  expect(await lastCrop()).toEqual({ method: 'page', reason: null, rect: { x: 0, y: 90, width: 760, height: 710 }, picture: { width: 1000, height: 800 }, frame: geometry.frame, pages: geometry.pages })
+  expect(await app.evaluate(() => (globalThis as unknown as { __tnTest: Handle }).__tnTest.hotkeys.record.lastCapture)).toEqual({ from: 'window', title: TITLE })
+  // The keyboard stayed with the chart.
+  expect(await focusEvents(app)).toBe(0)
+  expect(await notesWindow(app)).toEqual({ visible: true, focused: false })
+
+  // A picture that came at half the frame's size: the cut scales with it.
+  await setWindow(windowPng(0.5), true)
+  await pressAt(app, 'snapshot', at(25, 11, 1, 0))
+  await expect.poll(async () => (await logImages()).length).toBe(2)
+  const half = stored((await logImages())[1]!)
+  expect({ width: half.width, height: half.height }).toEqual({ width: 380, height: 355 })
+  expect(allOf(half, PAGE)).toEqual([])
+
+  // Nothing said about the window: the whole window is kept, as before.
+  await setWindow(windowPng(1), false)
+  await pressAt(app, 'snapshot', at(25, 11, 2, 0))
+  await expect.poll(async () => (await logImages()).length).toBe(3)
+  const third = (await logImages())[2]!
+  expect(third.attrs).toMatchObject({ caption: '11:02:00 · ES1! 6,123.25', naturalWidth: 1000, naturalHeight: 800 })
+  const whole = stored(third)
+  expect({ width: whole.width, height: whole.height }).toEqual({ width: 1000, height: 800 })
+  expect(whole.rgbAt(0, 0)).toEqual(BAR)
+  expect(whole.rgbAt(999, 799)).toEqual(PANEL)
+  expect(await lastCrop()).toMatchObject({ method: 'none', reason: 'no window geometry was given for this stand-in window', rect: null, picture: { width: 1000, height: 800 } })
+  expect(await focusEvents(app)).toBe(0)
+  await expect(page.locator('.toast').filter({ hasText: 'Chart snapshot added' }).first()).toBeVisible()
 })
 
 test('risk calculator: contracts from a dollar risk and a stop, in points, ticks or prices; Enter copies the count', async () => {

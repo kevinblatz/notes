@@ -6,6 +6,7 @@ import { appendFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, desktopCapturer, dialog, nativeImage, powerMonitor, screen, session } from 'electron'
 import { bindingsFromPreferences, HOTKEY_IDS, type HotkeyId } from '@shared/hotkeys'
+import type { WindowGeometry } from '@shared/pageCrop'
 import type { Preferences, SessionInfo } from '@shared/types'
 import appIcon from '../../resources/icon.png?asset'
 import trayIco from '../../resources/tray.ico?asset'
@@ -17,9 +18,10 @@ import { foregroundStatus } from './foreground'
 import { registerIpc } from './ipc'
 import { handleAttachmentRequests, registerAttachmentScheme } from './protocol'
 import { ShortcutManager } from './shortcut'
-import { captureChart, type GetSources } from './snapshot'
+import { captureChart, type CaptureResult, type GetSources, type ReadGeometry } from './snapshot'
 import { Library } from './store/library'
 import { TrayController } from './tray'
+import { lookUpWindowGeometry, windowGeometryStatus } from './windowGeometry'
 import { WindowManager, type ShowMode } from './windowManager'
 
 const isTest = process.env.TRADING_NOTES_TEST === '1'
@@ -106,7 +108,9 @@ async function main(): Promise<void> {
     desktopSources: TestSource[] | null
     /** Makes capturing fail with this message. */
     captureError: string | null
-  } = { failSaves: false, quitChoice: 'ask', clockOffsetMs: 0, desktopSources: null, captureError: null }
+    /** What Windows would say about the stand-in windows, by source id (frame and pages, physical pixels). */
+    windowGeometry: Record<string, WindowGeometry> | null
+  } = { failSaves: false, quitChoice: 'ask', clockOffsetMs: 0, desktopSources: null, captureError: null, windowGeometry: null }
   const now = (): number => Date.now() + testHooks.clockOffsetMs
 
   const quit = async (): Promise<void> => {
@@ -184,6 +188,16 @@ async function main(): Promise<void> {
       // Diagnostics are best effort.
     }
   }
+  // One line per snapshot: what was captured and what was kept of it (never the picture or its title).
+  const snapshotLog = (result: CaptureResult): void => {
+    if (!diagnosticsFile) return
+    try {
+      const line = result.ok ? { at: Date.now(), ok: true, from: result.from, crop: result.crop } : { at: Date.now(), ok: false, message: result.message }
+      appendFileSync(`${diagnosticsFile}.snapshot.log`, `${JSON.stringify(line)}\n`)
+    } catch {
+      // Diagnostics are best effort.
+    }
+  }
 
   const manager = new WindowManager({
     library: lib,
@@ -199,6 +213,7 @@ async function main(): Promise<void> {
   windows = manager
   // Load user32 now rather than at the first hotkey, which must act at once.
   const keyboardReturn = foregroundStatus()
+  const snapshotPage = windowGeometryStatus()
 
   const applyPreferences = (previous: Preferences, next: Preferences): void => {
     if (previous.alwaysOnTop !== next.alwaysOnTop) manager.setAlwaysOnTop(next.alwaysOnTop)
@@ -223,20 +238,30 @@ async function main(): Promise<void> {
         thumbnail: options.thumbnailSize?.width === 0 ? nativeImage.createEmpty() : nativeImage.createFromBuffer(Buffer.from(source.png, 'base64'))
       }))
   }
+  // Stand-in geometry for the stand-in windows: never the real windows of the test machine.
+  const testGeometry: ReadGeometry = (sourceId) => {
+    const geometry = testHooks.windowGeometry?.[sourceId]
+    return geometry ? { ok: true, geometry } : { ok: false, reason: 'no window geometry was given for this stand-in window' }
+  }
 
   const hotkeys = new HotkeyController({
     windows: manager,
     library: lib,
     now,
     applyPreferences,
-    capture: () =>
-      captureChart({
-        getSources: isTest && (testHooks.desktopSources || testHooks.captureError) ? testSources : (options) => desktopCapturer.getSources(options),
+    capture: async () => {
+      const standIn = isTest && (testHooks.desktopSources || testHooks.captureError)
+      const result = await captureChart({
+        getSources: standIn ? testSources : (options) => desktopCapturer.getSources(options),
         displays: screen.getAllDisplays(),
         cursorDisplay: screen.getDisplayNearestPoint(screen.getCursorScreenPoint()),
         docked: manager.dockedRect(),
-        ownTitle: 'Trading Notes'
-      }),
+        ownTitle: 'Trading Notes',
+        readGeometry: standIn ? testGeometry : lookUpWindowGeometry
+      })
+      snapshotLog(result)
+      return result
+    },
     onSnapshotState: (text) => tray?.setStatus(text)
   })
   Object.assign(hotkeyHandlers, hotkeys.handlers(() => manager.toggle()))
@@ -333,6 +358,7 @@ async function main(): Promise<void> {
           shortcut: shortcuts.status(),
           hotkeys: shortcuts.statuses(),
           keyboardReturn,
+          snapshotPage,
           alwaysOnTop: win.isAlwaysOnTop(),
           bounds: win.getBounds(),
           dataDir: lib.dataDir

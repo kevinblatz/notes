@@ -51,8 +51,40 @@ export interface ChartTitle {
   price: string
 }
 
-/** Browser names Windows puts after the page title in a window title. */
-const BROWSER_SUFFIX = /\s[-–—]\s(?:Google Chrome|Chromium|Microsoft​?\s?Edge|Brave|Opera|Vivaldi|Mozilla Firefox|Firefox)(?:\s[-–—]\s.*)?$/
+/**
+ * Invisible characters a window title can carry: Chrome wraps the title in direction marks
+ * under a right-to-left Windows language (Arabic, Hebrew, Persian, Urdu), and Edge writes
+ * "Microsoft\u200bEdge" with a zero-width space.
+ */
+const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/gu
+
+const SEP = String.raw`\s?[-–—]\s`
+/** Text up to the next separator: a profile name. */
+const NOT_SEP = String.raw`(?:(?!${SEP}).)`
+/**
+ * What a browser puts after the page title in its window title. Chrome on Windows writes
+ * "<page> - Google Chrome" in every channel and profile (the profile name is only in the
+ * title read out by screen readers), translated as "– Google Chrome", "- Chrome" (Korean),
+ * "- I-Google Chrome" (Zulu) or "– „Google Chrome“" (Lithuanian). Edge writes
+ * "<page> - Personal - Microsoft Edge", or "<page> and 2 more pages - Personal - Microsoft Edge"
+ * with several tabs selected.
+ */
+const BROWSER_SUFFIX = new RegExp(
+  '(?:' +
+    [
+      String.raw`${SEP}„?(?:I-)?(?:Google\s)?Chrome(?:\s(?:Beta|Dev|Canary))?“?`,
+      String.raw`${SEP}Chromium`,
+      String.raw`(?:\sand\s\d+\smore\spages?)?${SEP}(?:${NOT_SEP}{1,80}${SEP})?Microsoft\s?Edge(?:\s(?:Beta|Dev|Canary))?`,
+      String.raw`${SEP}(?:Brave|Opera|Vivaldi|(?:Mozilla\s)?Firefox(?:\sPrivate\sBrowsing)?)`
+    ].join('|') +
+    String.raw`)(?:${SEP}.*)?$`,
+  'u'
+)
+
+/** The page's own title in a browser's window title: "ES1! … Unnamed - Google Chrome" -> "ES1! … Unnamed". */
+export function pageTitle(windowTitle: string): string {
+  return windowTitle.replace(INVISIBLE, '').replace(BROWSER_SUFFIX, '').trim()
+}
 
 /**
  * Read the symbol and last price from a TradingView chart title, as Chrome shows it in the
@@ -60,10 +92,10 @@ const BROWSER_SUFFIX = /\s[-–—]\s(?:Google Chrome|Chromium|Microsoft​?\s?E
  * Null for any title that does not look like one: nothing is ever guessed.
  */
 export function parseTradingViewTitle(title: string): ChartTitle | null {
-  const text = title.replace(BROWSER_SUFFIX, '').trim()
-  const match = /^(?:\(\d+\)\s*)?([A-Z0-9][A-Z0-9._!:/&-]{0,39})\s+(\d{1,3}(?:[,   ]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s+(?:[▲▼△▽]\s*)?[+\-−]?\d[\d.,]*\s?%/u.exec(text)
+  const text = pageTitle(title)
+  const match = /^(?:\(\d+\)\s*)?([A-Z0-9][A-Z0-9._!:/&-]{0,39})\s+(\d{1,3}(?:[,\u00A0\u202F ]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s+(?:[▲▼△▽]\s*)?[+\-−]?\d[\d.,]*\s?%/u.exec(text)
   if (!match) return null
-  return { symbol: match[1]!, price: match[2]!.replace(/[  ]/g, ' ') }
+  return { symbol: match[1]!, price: match[2]!.replace(/[\u00A0\u202F]/g, ' ') }
 }
 
 /** A window worth capturing as "the chart": TradingView's own window, or a TradingView chart tab. */

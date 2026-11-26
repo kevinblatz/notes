@@ -30,6 +30,7 @@ import {
   logImage,
   logInsertIndex,
   logParagraph,
+  pageTitle,
   parseTradingViewTitle,
   quickNoteLine,
   sessionLogTitle,
@@ -204,6 +205,46 @@ describe('session log', () => {
     expect(snapshotCaption(local(25, 10, 32, 14), 'ES1! 6,123.25 ▲ +0.35% Unnamed - Google Chrome')).toBe('10:32:14 · ES1! 6,123.25')
     expect(snapshotCaption(local(25, 10, 32, 14), 'Supercharts — TradingView')).toBe('10:32:14')
     expect(snapshotCaption(local(25, 10, 32, 14), null)).toBe('10:32:14')
+  })
+
+  it('reads the chart title in every form Chrome and Edge give a window title', () => {
+    const chart = { symbol: 'ES1!', price: '6,123.25' }
+    const page = 'ES1! 6,123.25 ▲ +0.35% Unnamed'
+    // Chrome on Windows: "<page> - Google Chrome" in every channel and profile, as translated.
+    const chrome = [
+      `${page} - Google Chrome`,
+      `${page} – Google Chrome`, // Danish, Romanian, Serbian and others: an en dash
+      `${page} — Google Chrome`, // Canadian French: an em dash
+      `${page}\u00a0– Google Chrome`, // Belarusian
+      `${page} - Chrome`, // Korean
+      `${page} - I-Google Chrome`, // Zulu
+      `${page}– „Google Chrome“` // Lithuanian
+    ]
+    // Edge: its profile before its name, "and N more pages" with several tabs selected, and a
+    // zero-width space in "Microsoft Edge".
+    const edge = [`${page} - Personal - Microsoft\u200b Edge`, `${page} and 2 more pages - Work - Microsoft\u200b Edge`, `${page} - Microsoft Edge`, `${page} and 1 more page - Personal - Microsoft\u200bEdge`]
+    const others = [`${page} - Brave`, `${page} - Opera`, `${page} - Vivaldi`, `${page} — Mozilla Firefox`, `${page} — Mozilla Firefox Private Browsing`, `${page} - Chromium`]
+    for (const title of [...chrome, ...edge, ...others]) {
+      expect(pageTitle(title), title).toBe(page)
+      expect(parseTradingViewTitle(title), title).toEqual(chart)
+      expect(snapshotCaption(local(25, 10, 32, 14), title), title).toBe('10:32:14 · ES1! 6,123.25')
+    }
+    // Under a right-to-left Windows language Chrome wraps the title in direction marks.
+    for (const title of [`\u202a${page} - Google Chrome\u202c`, `\u200f${page} - Google Chrome`, `\u2066${page}\u2069 - Google Chrome`]) {
+      expect(pageTitle(title), JSON.stringify(title)).toBe(page)
+      expect(parseTradingViewTitle(title), JSON.stringify(title)).toEqual(chart)
+      expect(isTradingViewWindow(title)).toBe(true)
+    }
+    // A page title with dashes of its own keeps them; only the browser's part goes.
+    expect(pageTitle('Chart - ES - notes - Google Chrome')).toBe('Chart - ES - notes')
+    expect(pageTitle('Anti-Chrome tips - Google Chrome')).toBe('Anti-Chrome tips')
+    expect(pageTitle('Supercharts — TradingView')).toBe('Supercharts — TradingView')
+    expect(pageTitle('Inbox (3) - Gmail - Google Chrome')).toBe('Inbox (3) - Gmail')
+    // Unicode thousands separators in the price are kept as plain spaces.
+    expect(parseTradingViewTitle('ES1! 6\u202f123,25 ▲ +0,35% Unnamed - Google Chrome')).toEqual({ symbol: 'ES1!', price: '6 123,25' })
+    expect(parseTradingViewTitle('ES1! 6\u00a0123,25 ▼ −0,35% Unnamed - Google Chrome')).toEqual({ symbol: 'ES1!', price: '6 123,25' })
+    // A window the user named ("Name window…") carries only that name: nothing is guessed from it.
+    expect(parseTradingViewTitle('Trading')).toBeNull()
   })
 
   it('adds entries after the last line with content', () => {

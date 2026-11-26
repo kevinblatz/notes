@@ -3,8 +3,14 @@
  * the keyboard or coming forward: the window whose title is a TradingView chart (or names
  * TradingView) when there is one, otherwise the display under the pointer with the notes
  * window cut away when it is docked to one side of that display.
+ *
+ * Of a browser window only the web page is kept: the browser's tabs, address bar, bookmarks
+ * bar and side panels are cut away, using where Windows says the page sits in the window
+ * (see windowGeometry.ts and @shared/pageCrop). When that cannot be told, the whole window is
+ * kept, as before.
  */
 import type { Display, NativeImage, SourcesOptions } from 'electron'
+import { keepsWholePicture, pageCrop, type Size, type WindowGeometry } from '@shared/pageCrop'
 import { isTradingViewWindow, parseTradingViewTitle } from '@shared/sessionLog'
 import type { Rect } from '@shared/windowBounds'
 
@@ -16,6 +22,8 @@ export interface CaptureSource {
   thumbnail: NativeImage
 }
 export type GetSources = (options: SourcesOptions) => Promise<CaptureSource[]>
+/** Where the page is in the window behind a window source id, or why that cannot be told. */
+export type ReadGeometry = (sourceId: string) => { ok: true; geometry: WindowGeometry } | { ok: false; reason: string }
 
 export interface CaptureContext {
   getSources: GetSources
@@ -26,10 +34,26 @@ export interface CaptureContext {
   docked: { bounds: Rect; displayId: number } | null
   /** Windows with this title are the app's own and never captured. */
   ownTitle: string
+  readGeometry: ReadGeometry
+}
+
+/** What was kept of a window's picture, and why: for the diagnostics report and the tests. */
+export interface CropReport {
+  /** 'page': only the web page was kept. 'none': the whole window was kept. */
+  method: 'page' | 'none'
+  /** Why the whole window was kept. */
+  reason: string | null
+  /** The part of the picture kept, in the picture's pixels. */
+  rect: Rect | null
+  /** The window's picture as captured. */
+  picture: Size
+  /** What Windows said about the window, in physical pixels (null when nothing could be read). */
+  frame: Rect | null
+  pages: Rect[]
 }
 
 export type CaptureResult =
-  | { ok: true; image: NativeImage; title: string | null; from: 'window' | 'display' }
+  | { ok: true; image: NativeImage; title: string | null; from: 'window' | 'display'; crop: CropReport | null }
   | { ok: false; message: string }
 
 const NOTHING_CAPTURED = 'Nothing could be captured. Screen capture may not be allowed on this computer.'
@@ -70,15 +94,34 @@ export function cropAwayNotes(display: Pick<Display, 'id' | 'bounds'>, docked: C
   return { x, y: 0, width, height: Math.round(bounds.height * scaleY) }
 }
 
+/** Keep only the web page of a window's picture when Windows says where it is; otherwise all of it. */
+export function cropToPage(picture: NativeImage, lookup: ReturnType<ReadGeometry>): { image: NativeImage; crop: CropReport } {
+  const size = picture.getSize()
+  if (!lookup.ok) return { image: picture, crop: { method: 'none', reason: lookup.reason, rect: null, picture: size, frame: null, pages: [] } }
+  const { frame, pages } = lookup.geometry
+  const crop = pageCrop(lookup.geometry, size)
+  if (crop.method === 'none') return { image: picture, crop: { method: 'none', reason: crop.reason, rect: null, picture: size, frame, pages } }
+  const image = keepsWholePicture(crop.rect, size) ? picture : picture.crop(crop.rect)
+  return { image, crop: { method: 'page', reason: null, rect: crop.rect, picture: size, frame, pages } }
+}
+
 export async function captureChart(context: CaptureContext): Promise<CaptureResult> {
   try {
     // Names only first (no pictures), to find the chart cheaply.
     const listed = await context.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })
     const chart = chooseChartWindow(listed, context.ownTitle)
     if (chart) {
-      const sources = await context.getSources({ types: ['window'], thumbnailSize: largestDisplaySize(context.displays), fetchWindowIcons: false })
+      // Read just before the picture is taken. With the window's frame known, the picture is
+      // asked for at exactly that size, so that it is pixel for pixel what is on screen.
+      const lookup = context.readGeometry(chart.id)
+      const frame = lookup.ok ? lookup.geometry.frame : null
+      const thumbnailSize = frame && frame.width > 0 && frame.height > 0 ? { width: frame.width, height: frame.height } : largestDisplaySize(context.displays)
+      const sources = await context.getSources({ types: ['window'], thumbnailSize, fetchWindowIcons: false })
       const source = sources.find((candidate) => candidate.id === chart.id)
-      if (source && !source.thumbnail.isEmpty()) return { ok: true, image: source.thumbnail, title: source.name, from: 'window' }
+      if (source && !source.thumbnail.isEmpty()) {
+        const { image, crop } = cropToPage(source.thumbnail, lookup)
+        return { ok: true, image, title: source.name, from: 'window', crop }
+      }
     }
     const display = context.cursorDisplay
     const size = { width: Math.round(display.bounds.width * display.scaleFactor), height: Math.round(display.bounds.height * display.scaleFactor) }
@@ -87,7 +130,7 @@ export async function captureChart(context: CaptureContext): Promise<CaptureResu
     if (!screen || screen.thumbnail.isEmpty()) return { ok: false, message: NOTHING_CAPTURED }
     const picture = screen.thumbnail.getSize()
     const crop = cropAwayNotes(display, context.docked, picture)
-    return { ok: true, image: crop ? screen.thumbnail.crop(crop) : screen.thumbnail, title: chart?.name ?? null, from: 'display' }
+    return { ok: true, image: crop ? screen.thumbnail.crop(crop) : screen.thumbnail, title: chart?.name ?? null, from: 'display', crop: null }
   } catch (error) {
     return { ok: false, message: `The chart could not be captured: ${error instanceof Error ? error.message : String(error)}` }
   }

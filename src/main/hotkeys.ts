@@ -11,7 +11,7 @@ import type { HotkeyId } from '@shared/hotkeys'
 import { seeThroughToggleTarget } from '@shared/preferences'
 import { clockTime, localDateKey, snapshotCaption } from '@shared/sessionLog'
 import type { Preferences } from '@shared/types'
-import { encodeSnapshot, type CaptureResult } from './snapshot'
+import { encodeSnapshot, type CaptureResult, type CropReport } from './snapshot'
 import type { Library } from './store/library'
 import type { WindowManager } from './windowManager'
 
@@ -41,7 +41,13 @@ export class HotkeyController {
   private tokens = 0
   private capturing: Promise<void> | null = null
   /** For the automated desktop tests: what the last typing session did with the keyboard. */
-  readonly record = { lastHandBack: null as HandBack | null, lastCapture: null as { from: 'window' | 'display'; title: string | null } | null, snapshots: 0 }
+  readonly record = {
+    lastHandBack: null as HandBack | null,
+    lastCapture: null as { from: 'window' | 'display'; title: string | null } | null,
+    /** What was kept of the last window captured (null for a display). */
+    lastCrop: null as CropReport | null,
+    snapshots: 0
+  }
 
   constructor(private readonly options: HotkeyControllerOptions) {}
 
@@ -168,6 +174,7 @@ export class HotkeyController {
       })
       this.record.snapshots++
       this.record.lastCapture = { from: result.from, title: result.title }
+      this.record.lastCrop = result.crop
       onSnapshotState(`Last chart snapshot ${clockTime(at)}`)
       windows.send('snapshot', { ok: true, at, attachment, width: encoded.width, height: encoded.height, caption: snapshotCaption(at, result.title), windowShown })
     } catch (error) {

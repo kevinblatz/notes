@@ -16,13 +16,18 @@
       again when they were hidden, and the line typed is in today's session log in the notes
       database; Ctrl+Alt+R (risk calculator) copies the contract count and gives the keyboard
       back the same way; Ctrl+Alt+S (snapshot) never takes the keyboard from the chart and
-      stores one more image; Ctrl+Alt+O (see-through) changes the window's layered alpha and
-      back (reported for information). The database is read with Node's built-in node:sqlite,
-      read-only; without Node on PATH those database checks are reported for information.
+      stores one more image, of the browser window with only the web page kept (the stored
+      picture is shorter than the browser window by at least its tab strip and toolbar, and its
+      top corners are the page's background, not the browser's); Ctrl+Alt+O (see-through)
+      changes the window's layered alpha and back (reported for information). The database is
+      read with Node's built-in node:sqlite, read-only; without Node on PATH those database
+      checks are reported for information.
     - clicking the tray icon hides and shows it (reported for information; locating the
       icon depends on the Windows version)
     - launching the app a second time does not create a second window
     - Alt+F4 hides to the tray instead of quitting
+  It also prints the browser window's child windows (class, shown or hidden, rectangle) right
+  after it opens and again before the snapshot, to show where the browser keeps the web page.
 
   Usage (PowerShell, from the repository root, after `npm run package:win`):
       pwsh scripts/windows-native-check.ps1
@@ -65,6 +70,9 @@ public static class Native {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int command);
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int x, int y, int w, int h, bool repaint);
   [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr hWnd, out uint colorKey, out byte alpha, out uint flags);
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr lParam);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder name, int max);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
 }
 "@
 [void][Native]::SetProcessDPIAware()
@@ -107,6 +115,39 @@ function AlphaOf([IntPtr]$hWnd) {
   return [int]$alpha
 }
 function RootAt([int]$x, [int]$y) { $p = New-Object Native+POINT; $p.X = $x; $p.Y = $y; [Native]::GetAncestor([Native]::WindowFromPoint($p), 2) }
+function ClassOf([IntPtr]$hWnd) { $sb = New-Object System.Text.StringBuilder 256; [void][Native]::GetClassName($hWnd, $sb, 256); $sb.ToString() }
+# The visible frame, as the desktop window manager draws it (DWMWA_EXTENDED_FRAME_BOUNDS): what
+# a window capture pictures. GetWindowRect also counts the invisible resize borders.
+function FrameOf([IntPtr]$hWnd) { $r = New-Object Native+RECT; if ([Native]::DwmGetWindowAttribute($hWnd, 9, [ref]$r, 16) -ne 0) { return (RectOf $hWnd) }; $r }
+# Every child window, at any depth: class, shown or hidden, rectangle. Window geometry only:
+# nothing is sent to the browser, and its accessibility support is not switched on.
+function ChildWindows([IntPtr]$hWnd) {
+  $found = New-Object System.Collections.Generic.List[object]
+  $callback = [Native+EnumProc] {
+    param($child, $lParam)
+    $found.Add([pscustomobject]@{ hwnd = $child; class = (ClassOf $child); visible = [Native]::IsWindowVisible($child); rect = (RectOf $child) }); return $true
+  }
+  [void][Native]::EnumChildWindows($hWnd, $callback, [IntPtr]::Zero)
+  return ,$found
+}
+# Where Chromium shows the web page: the largest visible Chrome_RenderWidgetHostHWND child
+# (the "Chrome Legacy Window"), or $null.
+function PageWindowOf([IntPtr]$hWnd) {
+  $best = $null; $bestArea = 0
+  foreach ($child in (ChildWindows $hWnd)) {
+    if ($child.class -ne "Chrome_RenderWidgetHostHWND" -or -not $child.visible) { continue }
+    $area = [int64]($child.rect.Right - $child.rect.Left) * [int64]($child.rect.Bottom - $child.rect.Top)
+    if ($area -gt $bestArea) { $best = $child.rect; $bestArea = $area }
+  }
+  return $best
+}
+function ReportChildWindows([IntPtr]$hWnd, [string]$when) {
+  $children = ChildWindows $hWnd
+  Say ("  browser window {0}: window {1}, visible frame {2}, {3} child window(s)" -f $when, (RectText (RectOf $hWnd)), (RectText (FrameOf $hWnd)), $children.Count)
+  foreach ($child in ($children | Select-Object -First 40)) {
+    Say ("    {0} [{1}] {2}" -f $child.class, $(if ($child.visible) { "shown" } else { "hidden" }), (RectText $child.rect))
+  }
+}
 
 # Every visible top-level window whose title matches, optionally limited to one process name.
 function FindWindows([string]$titlePattern, [string]$processName = "", [bool]$visibleOnly = $true) {
@@ -157,6 +198,10 @@ function FindTrayIcon([string]$tooltip) {
   # The icon lives in a Windows shell window (which one depends on the Windows version), so
   # every top-level window is searched except the app's own, which carries the same name.
   $appIds = @(Get-Process -Name $appName -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+  # Nor the browser's: searching inside them with UI Automation would switch on the browser's
+  # accessibility support (the app itself never does), and the snapshot check below must see
+  # the browser as a user's browser is.
+  if ($browserName) { $appIds += @(Get-Process -Name $browserName -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) }
   $search = {
     foreach ($top in $automation::RootElement.FindAll($scope::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
       try {
@@ -237,7 +282,12 @@ try {
       logNotes: logs.length,
       logImages: logs.reduce((sum, note) => sum + images(parse(note.content_json)), 0),
       inLogText: logs.some((note) => has(note.plain_text)),
-      inOtherText: others.filter((note) => has(note.plain_text)).length
+      inOtherText: others.filter((note) => has(note.plain_text)).length,
+      // The picture stored last, as the app recorded it (its file is in attachments/ beside the database).
+      latest: (() => {
+        const row = db.prepare('SELECT file_name, width, height FROM attachments ORDER BY created_at DESC LIMIT 1').get()
+        return row ? { file: String(row.file_name), width: Number(row.width), height: Number(row.height) } : null
+      })()
     }
   } finally {
     db.close()
@@ -306,7 +356,7 @@ $chromeProfile = Join-Path ([System.IO.Path]::GetTempPath()) ("tn-chrome-" + [gu
 $env:TRADING_NOTES_DATA_DIR = $dataDir
 $diagnostics = Join-Path (Resolve-Path $OutDir).Path "app-diagnostics.json"
 $env:TRADING_NOTES_DIAGNOSTICS = $diagnostics
-Remove-Item $diagnostics, "$diagnostics.keyboard.log" -ErrorAction SilentlyContinue
+Remove-Item $diagnostics, "$diagnostics.keyboard.log", "$diagnostics.snapshot.log" -ErrorAction SilentlyContinue
 $work = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 Say "Screen $($screen.Width)x$($screen.Height), work area $($work.X),$($work.Y) $($work.Width)x$($work.Height)"
@@ -355,6 +405,9 @@ try {
     # let go of the keyboard, not give it to the exact window that had it.
     $keyboardReturn = if ($report.PSObject.Properties["keyboardReturn"]) { $report.keyboardReturn } else { $null }
     Check "App can give the keyboard back to the exact window that had it (user32 through koffi)" ($keyboardReturn -and [bool]$keyboardReturn.available) ($(if ($keyboardReturn -and $keyboardReturn.error) { $keyboardReturn.error } elseif (-not $keyboardReturn) { "not reported" } else { "" }))
+    # The same for reading where the page is in a browser window (user32 and dwmapi), for the snapshot.
+    $snapshotPage = if ($report.PSObject.Properties["snapshotPage"]) { $report.snapshotPage } else { $null }
+    Check "App can read browser window geometry for the snapshot (user32 and dwmapi through koffi)" ($snapshotPage -and [bool]$snapshotPage.available) ($(if ($snapshotPage -and $snapshotPage.error) { $snapshotPage.error } elseif (-not $snapshotPage) { "not reported" } else { "" }))
   }
 
   $rect = RectOf $notes
@@ -371,7 +424,10 @@ try {
                  "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
   if (-not $chromeExe) { throw "Neither Chrome nor Edge was found to act as the chart window." }
   $browserName = [System.IO.Path]::GetFileNameWithoutExtension($chromeExe)
-  $page = "data:text/html,<title>chartwindow</title><body style='margin:0;background:%23131722'><textarea id='t' autofocus style='width:100%25;height:100vh;background:%23131722;color:white;font-size:28px;border:0' oninput='document.title=this.value'></textarea>"
+  # Its whole page is TradingView's dark background (#131722), with no focus ring or scroll bar
+  # at its edges, so that the snapshot check can tell the page from the browser's own bars.
+  $pageColour = [System.Drawing.Color]::FromArgb(0x13, 0x17, 0x22)
+  $page = "data:text/html,<title>chartwindow</title><body style='margin:0;overflow:hidden;background:%23131722'><textarea id='t' autofocus style='display:block;box-sizing:border-box;width:100%25;height:100vh;margin:0;background:%23131722;color:white;font-size:28px;border:0;outline:none;resize:none' oninput='document.title=this.value'></textarea>"
   $halfWidth = [math]::Floor($work.Width / 2)
   Start-Process -FilePath $chromeExe -ArgumentList @("--user-data-dir=`"$chromeProfile`"", "--no-first-run", "--no-default-browser-check", "--disable-sync", "--new-window",
     "--window-position=$($work.X),$($work.Y)", "--window-size=$halfWidth,$($work.Height)", "`"$page`"") | Out-Null
@@ -381,6 +437,10 @@ try {
   [void][Native]::MoveWindow($chrome, $work.X, $work.Y, $halfWidth, $work.Height, $true)
   Start-Sleep -Seconds 2
   Shot "02-side-by-side"
+  # Before anything here could switch on the browser's accessibility support.
+  ReportChildWindows $chrome "right after it opened"
+  $earlyPage = PageWindowOf $chrome
+  Check "The browser shows the web page in a page window of its own (Chrome_RenderWidgetHostHWND), without accessibility switched on" ($null -ne $earlyPage) ($(if ($earlyPage) { "page window " + (RectText $earlyPage) } else { "no shown Chrome_RenderWidgetHostHWND child window" })) $false
 
   # ---------------------------------------------------------------- click the chart repeatedly
   $before = RectOf $notes
@@ -568,6 +628,17 @@ try {
     Say "  (the chart did not have the keyboard before the snapshot; clicking it so the snapshot is checked on its own)"
     Click $chartPoint[0] $chartPoint[1]
   }
+  # A TradingView-like title for the stand-in page, so that the snapshot takes the browser window
+  # rather than the display under the pointer: typed into the page's text box, which sets the
+  # page title. (Only this stand-in page is typed into; the app never sends keys to a browser.)
+  TypeText " tradingview"
+  $tvTitle = WaitFor { if ((Title $chrome) -match "tradingview") { $true } } 4000
+  Check "The stand-in chart page has a TradingView-like title, so the snapshot takes the browser window" ([bool]$tvTitle) ("chart window title: '" + (Title $chrome) + "'")
+  ReportChildWindows $chrome "before the snapshot"
+  $snapFrame = FrameOf $chrome
+  $snapPage = PageWindowOf $chrome
+  $snapLogFile = "$diagnostics.snapshot.log"
+  $snapLogBefore = if (Test-Path $snapLogFile) { @(Get-Content $snapLogFile).Count } else { 0 }
   $snapBefore = if ($dbReadable) { DbProbe } else { $null }
   $stolen = $false
   Chord "ctrl+alt+s"
@@ -581,6 +652,41 @@ try {
     if ($snapStored) {
       $snapLogged = WaitFor { $answer = DbProbe; if ($answer -and $answer.logImages -gt $snapBefore.logImages) { $answer } } 6000
       Check "Snapshot appears in today's session log" ($null -ne $snapLogged) (ProbeText $(if ($snapLogged) { $snapLogged } else { DbProbe })) $false
+      # What the app says it captured and kept (its snapshot report, one line per snapshot).
+      $snapReport = $null
+      if (Test-Path $snapLogFile) {
+        $lines = @(Get-Content $snapLogFile)
+        if ($lines.Count -gt $snapLogBefore) { try { $snapReport = $lines[-1] | ConvertFrom-Json } catch { } ; Say ("  app's snapshot report: " + $lines[-1]) }
+      }
+      if (-not $snapReport) { Say "  (the app wrote no snapshot report)" }
+      Check "Snapshot takes the browser window, not the display" ($snapReport -and $snapReport.from -eq "window") ($(if ($snapReport) { "from: $($snapReport.from)" } else { "no report" }))
+      # The stored picture itself: of the browser window only the web page is kept.
+      $latest = $snapStored.latest
+      $picture = $null
+      if ($latest) {
+        $pictureFile = Join-Path (Join-Path (Split-Path $dbFile -Parent) "attachments") $latest.file
+        try { $picture = New-Object System.Drawing.Bitmap $pictureFile } catch { Say "  (the stored snapshot could not be opened: $_)" }
+      }
+      if ($picture) {
+        try {
+          $frameW = $snapFrame.Right - $snapFrame.Left; $frameH = $snapFrame.Bottom - $snapFrame.Top
+          # Chrome's tab strip and toolbar together are well over 40 pixels high at any scale.
+          $browserBar = 40
+          $sizeText = "picture {0}x{1}, browser window frame {2}x{3}, page window {4}" -f $picture.Width, $picture.Height, $frameW, $frameH, $(if ($snapPage) { "{0}x{1}" -f ($snapPage.Right - $snapPage.Left), ($snapPage.Bottom - $snapPage.Top) } else { "not found" })
+          Check "Snapshot of the browser window is shorter than the window by at least its tab strip and toolbar" ($picture.Height -le ($frameH - $browserBar) -and $picture.Width -le $frameW) $sizeText
+          if ($snapPage) {
+            $pageW = $snapPage.Right - $snapPage.Left; $pageH = $snapPage.Bottom - $snapPage.Top
+            Check "Snapshot is the size of the browser's page window" ([math]::Abs($picture.Width - $pageW) -le 2 -and [math]::Abs($picture.Height - $pageH) -le 2) $sizeText $false
+          }
+          # Its top corners (and the middle of its top row) are the page's background, not the browser's bars.
+          $near = { param($c) [math]::Abs($c.R - $pageColour.R) -le 8 -and [math]::Abs($c.G - $pageColour.G) -le 8 -and [math]::Abs($c.B - $pageColour.B) -le 8 }
+          $corners = @(@(0, 0), @([int][math]::Floor($picture.Width / 2), 0), @(($picture.Width - 1), 0)) | ForEach-Object { $picture.GetPixel($_[0], $_[1]) }
+          $cornerText = ($corners | ForEach-Object { "#{0:x2}{1:x2}{2:x2}" -f $_.R, $_.G, $_.B }) -join " "
+          Check "Snapshot's top-left and top-right pixels are the page background (#131722), not the browser's tab strip" (@($corners | Where-Object { -not (& $near $_) }).Count -eq 0) ("top row left, middle, right: $cornerText")
+        } finally { $picture.Dispose() }
+      } else {
+        Check "Snapshot of the browser window is shorter than the window by at least its tab strip and toolbar" $false "the stored picture could not be found or opened"
+      }
     }
   } else {
     Check "Snapshot is stored in the notes database (one more image)" $false (ProbeText $null) $false
