@@ -7,10 +7,11 @@
  * Of a browser window only the web page is kept: the browser's tabs, address bar, bookmarks
  * bar and side panels are cut away, using where Windows says the page sits in the window
  * (see windowGeometry.ts and @shared/pageCrop). When that cannot be told, the whole window is
- * kept, as before.
+ * kept, as before. The picture is asked for at the size of the part of the window that
+ * Electron's window capture pictures, so that it is pixel for pixel what is on screen.
  */
 import type { Display, NativeImage, SourcesOptions } from 'electron'
-import { keepsWholePicture, pageCrop, type Size, type WindowGeometry } from '@shared/pageCrop'
+import { captureSize, keepsWholePicture, pageCrop, type Size, type WindowGeometry } from '@shared/pageCrop'
 import { isTradingViewWindow, parseTradingViewTitle } from '@shared/sessionLog'
 import type { Rect } from '@shared/windowBounds'
 
@@ -47,9 +48,17 @@ export interface CropReport {
   rect: Rect | null
   /** The window's picture as captured. */
   picture: Size
+  /** The size it was asked for at. */
+  requested: Size | null
+  /** The part of the screen the picture was found to show, in physical pixels (null when not worked out). */
+  pictured: Rect | null
   /** What Windows said about the window, in physical pixels (null when nothing could be read). */
   frame: Rect | null
+  /** The part of the window webrtc's GDI window capturer pictures (null when nothing could be read). */
+  gdiRegion: Rect | null
   pages: Rect[]
+  /** The window's DPI, when known. */
+  dpi: number | null
 }
 
 export type CaptureResult =
@@ -94,15 +103,18 @@ export function cropAwayNotes(display: Pick<Display, 'id' | 'bounds'>, docked: C
   return { x, y: 0, width, height: Math.round(bounds.height * scaleY) }
 }
 
-/** Keep only the web page of a window's picture when Windows says where it is; otherwise all of it. */
-export function cropToPage(picture: NativeImage, lookup: ReturnType<ReadGeometry>): { image: NativeImage; crop: CropReport } {
+/** Keep only the web page of a window's picture, asked for at `requested`, when Windows says where it is; otherwise all of it. */
+export function cropToPage(picture: NativeImage, lookup: ReturnType<ReadGeometry>, requested: Size | null): { image: NativeImage; crop: CropReport } {
   const size = picture.getSize()
-  if (!lookup.ok) return { image: picture, crop: { method: 'none', reason: lookup.reason, rect: null, picture: size, frame: null, pages: [] } }
+  const none = { method: 'none' as const, rect: null, picture: size, requested, pictured: null }
+  if (!lookup.ok) return { image: picture, crop: { ...none, reason: lookup.reason, frame: null, gdiRegion: null, pages: [], dpi: null } }
   const { frame, pages } = lookup.geometry
-  const crop = pageCrop(lookup.geometry, size)
-  if (crop.method === 'none') return { image: picture, crop: { method: 'none', reason: crop.reason, rect: null, picture: size, frame, pages } }
+  const known = { frame, gdiRegion: lookup.geometry.gdiRegion ?? null, pages, dpi: lookup.geometry.dpi ?? null }
+  if (!requested) return { image: picture, crop: { ...none, ...known, reason: 'the picture was not asked for at the browser window’s size' } }
+  const crop = pageCrop(lookup.geometry, size, requested)
+  if (crop.method === 'none') return { image: picture, crop: { ...none, ...known, reason: crop.reason } }
   const image = keepsWholePicture(crop.rect, size) ? picture : picture.crop(crop.rect)
-  return { image, crop: { method: 'page', reason: null, rect: crop.rect, picture: size, frame, pages } }
+  return { image, crop: { method: 'page', reason: null, rect: crop.rect, picture: size, requested, pictured: crop.pictured, ...known } }
 }
 
 export async function captureChart(context: CaptureContext): Promise<CaptureResult> {
@@ -111,15 +123,15 @@ export async function captureChart(context: CaptureContext): Promise<CaptureResu
     const listed = await context.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })
     const chart = chooseChartWindow(listed, context.ownTitle)
     if (chart) {
-      // Read just before the picture is taken. With the window's frame known, the picture is
-      // asked for at exactly that size, so that it is pixel for pixel what is on screen.
+      // Read just before the picture is taken. With the window known, the picture is asked for
+      // at the size of the part of it that is pictured, so that it is pixel for pixel the screen.
       const lookup = context.readGeometry(chart.id)
-      const frame = lookup.ok ? lookup.geometry.frame : null
-      const thumbnailSize = frame && frame.width > 0 && frame.height > 0 ? { width: frame.width, height: frame.height } : largestDisplaySize(context.displays)
-      const sources = await context.getSources({ types: ['window'], thumbnailSize, fetchWindowIcons: false })
+      const fits = lookup.ok ? captureSize(lookup.geometry) : null
+      const requested = fits && fits.width > 0 && fits.height > 0 ? fits : null
+      const sources = await context.getSources({ types: ['window'], thumbnailSize: requested ?? largestDisplaySize(context.displays), fetchWindowIcons: false })
       const source = sources.find((candidate) => candidate.id === chart.id)
       if (source && !source.thumbnail.isEmpty()) {
-        const { image, crop } = cropToPage(source.thumbnail, lookup)
+        const { image, crop } = cropToPage(source.thumbnail, lookup, requested)
         return { ok: true, image, title: source.name, from: 'window', crop }
       }
     }

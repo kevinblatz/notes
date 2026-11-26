@@ -17,7 +17,19 @@ import { launch, removeDataDir, type Launched, type LaunchOptions } from './laun
 type HotkeyId = 'toggle' | 'quickNote' | 'snapshot' | 'risk' | 'candleTimer' | 'seeThrough' | 'openLog'
 interface Status { id: HotkeyId; accelerator: string; enabled: boolean; registered: boolean; error: string | null }
 interface Box { x: number; y: number; width: number; height: number }
-interface CropReport { method: 'page' | 'none'; reason: string | null; rect: Box | null; picture: { width: number; height: number }; frame: Box | null; pages: Box[] }
+interface Size { width: number; height: number }
+interface CropReport {
+  method: 'page' | 'none'
+  reason: string | null
+  rect: Box | null
+  picture: Size
+  requested: Size | null
+  pictured: Box | null
+  frame: Box | null
+  gdiRegion: Box | null
+  pages: Box[]
+  dpi: number | null
+}
 interface StoredNote { id: string; title: string | null; plainText: string; content: { content?: Array<{ type: string; attrs?: Record<string, unknown> }> }; extra: Record<string, unknown>; revision: number }
 interface Handle {
   library: {
@@ -34,7 +46,8 @@ interface Handle {
   testHooks: {
     desktopSources: Array<{ id: string; name: string; display_id?: string; png: string }> | null
     captureError: string | null
-    windowGeometry: Record<string, { frame: Box; pages: Box[] }> | null
+    windowGeometry: Record<string, { frame: Box; gdiRegion?: Box; pages: Box[]; dpi?: number | null }> | null
+    lastWindowThumbnailSize: Size | null
   }
   setNow: (ms: number) => void
 }
@@ -481,14 +494,24 @@ test('snapshot of a browser window keeps only the web page: its tabs, address ba
   const BAR: Rgb = [222, 225, 230] // the browser's tab strip, address bar and bookmarks bar
   const PANEL: Rgb = [250, 200, 40] // a side panel beside the page
   const PAGE: Rgb = [19, 23, 34] // TradingView's dark background, #131722
+  const BORDER: Rgb = [0, 0, 0] // the window's invisible resize borders, as a GDI capture gives them
   const TITLE = 'ES1! 6,123.25 ▲ +0.35% Unnamed - Google Chrome'
-  // The window's picture: the browser's bars across the top 90 rows, a side panel 240 wide on
-  // the right, the page in the rest. Windows says the same in physical pixels: the visible frame
-  // at 100,50 and two page windows, the page and (smaller) the side panel.
-  const windowPng = (scale: number): string =>
-    makePaintedPng(1000 * scale, 800 * scale, (x, y) => (y < 90 * scale ? BAR : x >= 760 * scale ? PANEL : PAGE)).toString('base64')
-  const geometry = { frame: { x: 100, y: 50, width: 1000, height: 800 }, pages: [{ x: 100, y: 140, width: 760, height: 710 }, { x: 860, y: 140, width: 240, height: 710 }] }
-  const setWindow = (png: string, withGeometry: boolean): Promise<void> =>
+  // A restored Chrome window, as Windows reports it in physical pixels: its rectangle at 93,50
+  // 1014x807 includes invisible resize borders of 7 px on the left, right and bottom; the
+  // visible frame is at 100,50 1000x800. Chrome's bars take its top 90 rows, a side panel 240
+  // wide sits on the right, and the page fills the rest; both are page windows.
+  const frame = { x: 100, y: 50, width: 1000, height: 800 }
+  const pages = [{ x: 100, y: 140, width: 760, height: 710 }, { x: 860, y: 140, width: 240, height: 710 }]
+  // Electron's window capture (webrtc's GDI capturer) pictures the window less 4 px on the left,
+  // right and bottom and 1 px at the top (GetSystemMetrics at 96 DPI): some border is in it.
+  const gdiRegion = { x: 97, y: 51, width: 1006, height: 802 }
+  /** What is on screen at a physical pixel. */
+  const screenAt = (sx: number, sy: number): Rgb =>
+    sx < frame.x || sx >= frame.x + frame.width || sy >= frame.y + frame.height ? BORDER : sy < 140 ? BAR : sx >= 860 ? PANEL : PAGE
+  /** A picture of `region`, scaled to `width` x `height`. */
+  const pictureOf = (region: Box, width: number, height: number): string =>
+    makePaintedPng(width, height, (x, y) => screenAt(region.x + Math.floor((x * region.width) / width), region.y + Math.floor((y * region.height) / height))).toString('base64')
+  const setWindow = (png: string, geometry: { frame: Box; gdiRegion?: Box; pages: Box[]; dpi?: number } | null): Promise<void> =>
     app.evaluate(
       (_electron, input) => {
         const hooks = (globalThis as unknown as { __tnTest: Handle }).__tnTest.testHooks
@@ -496,13 +519,18 @@ test('snapshot of a browser window keeps only the web page: its tabs, address ba
           { id: 'window:7:0', name: 'Inbox - Mail', png: input.png },
           { id: 'window:42:0', name: input.title, png: input.png }
         ]
-        hooks.windowGeometry = input.geometry
+        hooks.windowGeometry = input.geometry ? { 'window:42:0': input.geometry } : null
+        hooks.lastWindowThumbnailSize = null
       },
-      { png, title: TITLE, geometry: withGeometry ? { 'window:42:0': geometry } : null }
+      { png, title: TITLE, geometry }
     )
   const logImages = async () => (await sessionLogs(app))[0]?.content.content?.filter((block) => block.type === 'noteImage') ?? []
   const stored = (image: { attrs?: Record<string, unknown> }) => readPng(readFileSync(join(dataDir, 'library', 'attachments', `${String(image.attrs!.attachmentId)}.png`)))
-  const lastCrop = (): Promise<CropReport | null> => app.evaluate(() => (globalThis as unknown as { __tnTest: Handle }).__tnTest.hotkeys.record.lastCrop)
+  const record = (): Promise<{ crop: CropReport | null; asked: Size | null }> =>
+    app.evaluate(() => {
+      const t = (globalThis as unknown as { __tnTest: Handle }).__tnTest
+      return { crop: t.hotkeys.record.lastCrop, asked: t.testHooks.lastWindowThumbnailSize }
+    })
   /** Every pixel along the four edges, and every tenth one inside, has this colour. */
   const allOf = (picture: ReturnType<typeof readPng>, colour: Rgb): string[] => {
     const wrong: string[] = []
@@ -515,45 +543,67 @@ test('snapshot of a browser window keeps only the web page: its tabs, address ba
     for (let y = 5; y < picture.height; y += 10) for (let x = 5; x < picture.width; x += 10) look(x, y)
     return wrong.slice(0, 5)
   }
+  const snapshot = async (minute: number): Promise<{ attrs?: Record<string, unknown> }> => {
+    const before = (await logImages()).length
+    await pressAt(app, 'snapshot', at(25, 11, minute, 0))
+    await expect.poll(async () => (await logImages()).length).toBe(before + 1)
+    return (await logImages())[before]!
+  }
 
-  await setWindow(windowPng(1), true)
+  // 1. As Electron really pictures the window: the GDI region, asked for at its own size. The
+  // page is placed in that region, so neither the border nor any row of Chrome's bars is kept.
+  await setWindow(pictureOf(gdiRegion, 1006, 802), { frame, gdiRegion, pages, dpi: 96 })
   await focusOtherApp(app)
-  await pressAt(app, 'snapshot', at(25, 11, 0, 0))
-  await expect.poll(async () => (await logImages()).length).toBe(1)
-  const first = (await logImages())[0]!
+  const first = await snapshot(0)
   expect(first.attrs).toMatchObject({ caption: '11:00:00 · ES1! 6,123.25', naturalWidth: 760, naturalHeight: 710 })
   const kept = stored(first)
   expect({ width: kept.width, height: kept.height }).toEqual({ width: 760, height: 710 })
-  // Its top row is the page, not the browser's bar; nothing of the side panel either.
+  // Its top row is the page, not the browser's bar; nothing of the side panel or the border either.
   expect(kept.rgbAt(0, 0)).toEqual(PAGE)
   expect(kept.rgbAt(759, 0)).toEqual(PAGE)
   expect(allOf(kept, PAGE)).toEqual([])
-  expect(await lastCrop()).toEqual({ method: 'page', reason: null, rect: { x: 0, y: 90, width: 760, height: 710 }, picture: { width: 1000, height: 800 }, frame: geometry.frame, pages: geometry.pages })
+  expect(await record()).toEqual({
+    asked: { width: 1006, height: 802 },
+    crop: { method: 'page', reason: null, rect: { x: 3, y: 89, width: 760, height: 710 }, picture: { width: 1006, height: 802 }, requested: { width: 1006, height: 802 }, pictured: gdiRegion, frame, gdiRegion, pages, dpi: 96 }
+  })
   expect(await app.evaluate(() => (globalThis as unknown as { __tnTest: Handle }).__tnTest.hotkeys.record.lastCapture)).toEqual({ from: 'window', title: TITLE })
   // The keyboard stayed with the chart.
   expect(await focusEvents(app)).toBe(0)
   expect(await notesWindow(app)).toEqual({ visible: true, focused: false })
 
-  // A picture that came at half the frame's size: the cut scales with it.
-  await setWindow(windowPng(0.5), true)
-  await pressAt(app, 'snapshot', at(25, 11, 1, 0))
-  await expect.poll(async () => (await logImages()).length).toBe(2)
-  const half = stored((await logImages())[1]!)
-  expect({ width: half.width, height: half.height }).toEqual({ width: 380, height: 355 })
-  expect(allOf(half, PAGE)).toEqual([])
+  // 2. Windows 11 falls back to Windows Graphics Capture, which pictures the visible frame,
+  // scaled to fit the size asked for (1003x802): told apart by its size and cut to the page.
+  await setWindow(pictureOf(frame, 1003, 802), { frame, gdiRegion, pages, dpi: 96 })
+  const fallback = stored(await snapshot(1))
+  expect({ width: fallback.width, height: fallback.height }).toEqual({ width: 760, height: 709 })
+  expect(allOf(fallback, PAGE)).toEqual([])
+  expect((await record()).crop).toMatchObject({ method: 'page', pictured: frame })
 
-  // Nothing said about the window: the whole window is kept, as before.
-  await setWindow(windowPng(1), false)
-  await pressAt(app, 'snapshot', at(25, 11, 2, 0))
-  await expect.poll(async () => (await logImages()).length).toBe(3)
-  const third = (await logImages())[2]!
-  expect(third.attrs).toMatchObject({ caption: '11:02:00 · ES1! 6,123.25', naturalWidth: 1000, naturalHeight: 800 })
+  // 3. Only the visible frame known, pictured at its size: cut the same way.
+  await setWindow(pictureOf(frame, 1000, 800), { frame, pages })
+  const frameOnly = stored(await snapshot(2))
+  expect({ width: frameOnly.width, height: frameOnly.height }).toEqual({ width: 760, height: 710 })
+  expect(allOf(frameOnly, PAGE)).toEqual([])
+  expect(await record()).toMatchObject({ asked: { width: 1000, height: 800 }, crop: { method: 'page', rect: { x: 0, y: 90, width: 760, height: 710 } } })
+
+  // 4. A picture of neither part of the window (not the size asked for): kept whole, not guessed at.
+  await setWindow(pictureOf(gdiRegion, 503, 401), { frame, gdiRegion, pages, dpi: 96 })
+  const odd = stored(await snapshot(3))
+  expect({ width: odd.width, height: odd.height }).toEqual({ width: 503, height: 401 })
+  expect((await record()).crop).toMatchObject({ method: 'none', reason: 'the picture is not of the browser window as Windows reports it', rect: null })
+
+  // 5. Nothing said about the window: the whole window is kept, as before.
+  await setWindow(pictureOf(gdiRegion, 1006, 802), null)
+  const third = await snapshot(4)
+  expect(third.attrs).toMatchObject({ caption: '11:04:00 · ES1! 6,123.25', naturalWidth: 1006, naturalHeight: 802 })
   const whole = stored(third)
-  expect({ width: whole.width, height: whole.height }).toEqual({ width: 1000, height: 800 })
-  expect(whole.rgbAt(0, 0)).toEqual(BAR)
-  expect(whole.rgbAt(999, 799)).toEqual(PANEL)
-  expect(await lastCrop()).toMatchObject({ method: 'none', reason: 'no window geometry was given for this stand-in window', rect: null, picture: { width: 1000, height: 800 } })
+  expect({ width: whole.width, height: whole.height }).toEqual({ width: 1006, height: 802 })
+  expect(whole.rgbAt(3, 0)).toEqual(BAR)
+  expect(whole.rgbAt(1001, 700)).toEqual(PANEL)
+  expect(whole.rgbAt(0, 0)).toEqual(BORDER)
+  expect((await record()).crop).toMatchObject({ method: 'none', reason: 'no window geometry was given for this stand-in window', rect: null, picture: { width: 1006, height: 802 } })
   expect(await focusEvents(app)).toBe(0)
+  expect(await notesWindow(app)).toEqual({ visible: true, focused: false })
   await expect(page.locator('.toast').filter({ hasText: 'Chart snapshot added' }).first()).toBeVisible()
 })
 

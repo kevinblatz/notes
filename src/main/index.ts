@@ -108,9 +108,11 @@ async function main(): Promise<void> {
     desktopSources: TestSource[] | null
     /** Makes capturing fail with this message. */
     captureError: string | null
-    /** What Windows would say about the stand-in windows, by source id (frame and pages, physical pixels). */
+    /** What Windows would say about the stand-in windows, by source id (frame, GDI region and pages, physical pixels). */
     windowGeometry: Record<string, WindowGeometry> | null
-  } = { failSaves: false, quitChoice: 'ask', clockOffsetMs: 0, desktopSources: null, captureError: null, windowGeometry: null }
+    /** The size the last window pictures were asked for at (set by the stand-in sources). */
+    lastWindowThumbnailSize: { width: number; height: number } | null
+  } = { failSaves: false, quitChoice: 'ask', clockOffsetMs: 0, desktopSources: null, captureError: null, windowGeometry: null, lastWindowThumbnailSize: null }
   const now = (): number => Date.now() + testHooks.clockOffsetMs
 
   const quit = async (): Promise<void> => {
@@ -229,6 +231,7 @@ async function main(): Promise<void> {
   const testSources: GetSources = async (options) => {
     if (testHooks.captureError) throw new Error(testHooks.captureError)
     const wanted = options.types
+    if (wanted.includes('window') && options.thumbnailSize && options.thumbnailSize.width > 0) testHooks.lastWindowThumbnailSize = { ...options.thumbnailSize }
     return (testHooks.desktopSources ?? [])
       .filter((source) => wanted.includes(source.id.startsWith('screen:') ? 'screen' : 'window'))
       .map((source) => ({

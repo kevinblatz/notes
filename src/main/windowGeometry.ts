@@ -3,16 +3,18 @@
  * keep the page and leave out the browser's tabs, address bar, bookmarks bar and side panels.
  *
  * Only window geometry is read: the window's visible frame from the desktop window manager
- * (DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS) and the rectangles of its visible
+ * (DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS), its rectangle, style, DPI and the
+ * system's resize border sizes (from which the part of it that Electron's window capture
+ * pictures is worked out, see gdiCaptureRegion), and the rectangles of its visible
  * Chrome_RenderWidgetHostHWND child windows (GetWindowRect), found by walking the child
  * windows with GetWindow (no callbacks). Nothing is sent to the browser: no keys, no clicks,
  * no window messages, and no accessibility or UI Automation, which would switch on the
- * browser's accessibility support and slow it down. Both readings are in physical pixels (the
+ * browser's accessibility support and slow it down. The readings are in physical pixels (the
  * desktop window manager always gives those; GetWindowRect does to a per-monitor DPI aware
  * process, which the Electron main process is, and that is checked). user32 and dwmapi are
  * reached through koffi, as in foreground.ts.
  */
-import { hwndFromSourceId, PAGE_WINDOW_CLASS, type WindowGeometry } from '@shared/pageCrop'
+import { gdiCaptureRegion, hwndFromSourceId, PAGE_WINDOW_CLASS, type WindowGeometry } from '@shared/pageCrop'
 import type { Rect } from '@shared/windowBounds'
 
 /** A window handle (HWND) as a number; 0 means none. */
@@ -64,6 +66,8 @@ export function findPageWindows(tree: WindowTree, root: WindowHandle): { pages: 
 
 /** What is read for one window, with what the snapshot report says about the reading. */
 export interface GeometryReading extends WindowGeometry {
+  /** The window's rectangle (GetWindowRect), resize borders included. */
+  window: Rect
   /** How many child windows were looked at. */
   walked: number
 }
@@ -108,6 +112,16 @@ export function windowGeometryApi(): WindowGeometryApi | null {
     const getClassName = user32.func('int __stdcall GetClassNameW(intptr_t hWnd, _Out_ uint8_t *lpClassName, int nMaxCount)')
     const getWindowRect = user32.func('int __stdcall GetWindowRect(intptr_t hWnd, _Out_ uint8_t *lpRect)')
     const getAttribute = dwmapi.func('int32_t __stdcall DwmGetWindowAttribute(intptr_t hwnd, uint32_t dwAttribute, _Out_ uint8_t *pvAttribute, uint32_t cbAttribute)')
+    const getWindowLong = user32.func('int32_t __stdcall GetWindowLongW(intptr_t hWnd, int nIndex)')
+    const getSystemMetrics = user32.func('int __stdcall GetSystemMetrics(int nIndex)')
+    // Windows 10 1607 and later: the window's DPI. Without it the display scale is not known.
+    let dpiOf: ((hwnd: WindowHandle) => number | null) | null = null
+    try {
+      const getDpiForWindow = user32.func('uint32_t __stdcall GetDpiForWindow(intptr_t hwnd)')
+      dpiOf = (hwnd) => Number(getDpiForWindow(hwnd)) || null
+    } catch {
+      dpiOf = null
+    }
     // Windows 10 1607 and later: how this thread is DPI aware. Without it, rectangles are taken as physical.
     let awareness: (() => number) | null = null
     try {
@@ -120,6 +134,10 @@ export function windowGeometryApi(): WindowGeometryApi | null {
     const GW_HWNDNEXT = 2
     const GW_CHILD = 5
     const DWMWA_EXTENDED_FRAME_BOUNDS = 9
+    const GWL_STYLE = -16
+    const SM_CYBORDER = 6
+    const SM_CXSIZEFRAME = 32
+    const SM_CYSIZEFRAME = 33
     const DPI_AWARENESS_PER_MONITOR_AWARE = 2
     const tree: WindowTree = {
       firstChild: (hwnd) => Number(getWindow(hwnd, GW_CHILD)),
@@ -141,8 +159,11 @@ export function windowGeometryApi(): WindowGeometryApi | null {
         const buffer = Buffer.alloc(16)
         if (Number(getAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, buffer, 16)) !== 0) return null
         const frame = rectFrom(buffer)
-        if (frame.width <= 0 || frame.height <= 0) return null
-        return { frame, ...findPageWindows(tree, hwnd) }
+        const window = tree.rect(hwnd)
+        if (frame.width <= 0 || frame.height <= 0 || !window || window.width <= 0 || window.height <= 0) return null
+        const metrics = { sizeFrameX: Number(getSystemMetrics(SM_CXSIZEFRAME)), sizeFrameY: Number(getSystemMetrics(SM_CYSIZEFRAME)), borderY: Number(getSystemMetrics(SM_CYBORDER)) }
+        const gdiRegion = gdiCaptureRegion(window, frame, Number(getWindowLong(hwnd, GWL_STYLE)), metrics)
+        return { frame, window, gdiRegion, dpi: dpiOf ? dpiOf(hwnd) : null, ...findPageWindows(tree, hwnd) }
       },
       physicalPixels: () => (awareness ? awareness() === DPI_AWARENESS_PER_MONITOR_AWARE : true)
     }
@@ -169,8 +190,8 @@ export function lookUpWindowGeometry(sourceId: string): GeometryLookup {
   if (!api) return { ok: false, reason: process.platform === 'win32' ? `window geometry could not be read (${loadError ?? 'user32 not loaded'})` : 'the page is only found on Windows' }
   const hwnd = hwndFromSourceId(sourceId)
   if (hwnd === null) return { ok: false, reason: 'the window source has no window handle' }
-  if (!api.physicalPixels()) return { ok: false, reason: 'window rectangles are scaled for this app, so they cannot be matched to the picture' }
   try {
+    if (!api.physicalPixels()) return { ok: false, reason: 'window rectangles are scaled for this app, so they cannot be matched to the picture' }
     const geometry = api.read(hwnd)
     return geometry ? { ok: true, geometry } : { ok: false, reason: 'the browser window could not be read (closed or minimized)' }
   } catch (error) {

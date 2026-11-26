@@ -1,6 +1,6 @@
 import type { Display, NativeImage, SourcesOptions } from 'electron'
 import { afterEach, describe, expect, it } from 'vitest'
-import { choosePage, hwndFromSourceId, keepsWholePicture, mapPageToPicture, pageCrop, type WindowGeometry } from '@shared/pageCrop'
+import { captureSize, choosePage, gdiCaptureRegion, hwndFromSourceId, keepsWholePicture, letterboxSize, mapPageToPicture, pageCrop, picturedRegion, type WindowGeometry } from '@shared/pageCrop'
 import type { Rect } from '@shared/windowBounds'
 import { captureChart, cropToPage, type CaptureContext, type CaptureSource } from '../../src/main/snapshot'
 import { foregroundApi } from '../../src/main/foreground'
@@ -62,7 +62,7 @@ describe('the page in the window’s picture', () => {
     const crop = mapPageToPicture(frame, frame, { width: 2560, height: 1440 })
     expect(crop).toEqual({ method: 'page', rect: rect(0, 0, 2560, 1440) })
     expect(crop.method === 'page' && keepsWholePicture(crop.rect, { width: 2560, height: 1440 })).toBe(true)
-    expect(pageCrop({ frame, pages: [frame] }, { width: 2560, height: 1440 })).toEqual({ method: 'page', rect: rect(0, 0, 2560, 1440) })
+    expect(pageCrop({ frame, pages: [frame] }, { width: 2560, height: 1440 })).toEqual({ method: 'page', rect: rect(0, 0, 2560, 1440), pictured: frame })
     expect(keepsWholePicture(rect(0, 1, 2560, 1439), { width: 2560, height: 1440 })).toBe(false)
   })
 
@@ -73,6 +73,87 @@ describe('the page in the window’s picture', () => {
     expect(mapPageToPicture(rect(0, 0, 0, 0), rect(0, 80, 1000, 720), { width: 1000, height: 800 }).method).toBe('none')
     // One pixel of rounding in the picture's height is fine.
     expect(mapPageToPicture(frame, rect(0, 80, 1000, 720), { width: 1000, height: 801 }).method).toBe('page')
+  })
+})
+
+describe('which part of the window the picture shows', () => {
+  // A restored Chrome window on Windows 10/11 at 100 %: its rectangle includes invisible
+  // resize borders, 7 px on the left, right and bottom; the visible frame is inside them.
+  const window = rect(93, 50, 1014, 807)
+  const frame = rect(100, 50, 1000, 800)
+  const thick = 0x16cf0000 // WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN (WS_THICKFRAME among them)
+  const metrics = { sizeFrameX: 4, sizeFrameY: 4, borderY: 1 } // GetSystemMetrics at 96 DPI
+
+  it('Electron’s window capture (webrtc’s GDI capturer) pictures the window less its resize borders as system metrics give them', () => {
+    expect(gdiCaptureRegion(window, frame, thick, metrics)).toEqual(rect(97, 51, 1006, 802))
+    // Maximized: the window rectangle hangs 8 px over the monitor's edges; the frame is the work area.
+    expect(gdiCaptureRegion(rect(-8, -8, 1936, 1056), rect(0, 0, 1920, 1040), thick, metrics)).toEqual(rect(-4, -7, 1928, 1051))
+    // At 150 % the system metrics are larger, and a monitor left of the main one has negative coordinates.
+    expect(gdiCaptureRegion(rect(-1931, 100, 1462, 1211), rect(-1920, 100, 1440, 1200), thick, { sizeFrameX: 6, sizeFrameY: 6, borderY: 1 })).toEqual(rect(-1925, 101, 1450, 1204))
+    // No invisible border (full screen, F11), or no resize border: the whole window rectangle.
+    expect(gdiCaptureRegion(rect(0, 0, 1920, 1080), rect(0, 0, 1920, 1080), thick, metrics)).toEqual(rect(0, 0, 1920, 1080))
+    expect(gdiCaptureRegion(window, frame, 0x96000000, metrics)).toEqual(window) // WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS
+  })
+
+  it('sizes a picture as desktopCapturer does: scaled to fit the size asked for, its shape kept', () => {
+    expect(letterboxSize({ width: 1006, height: 802 }, { width: 1006, height: 802 })).toEqual({ width: 1006, height: 802 })
+    // The visible frame, pictured instead (Windows Graphics Capture), into a request for the GDI region's size.
+    expect(letterboxSize({ width: 1006, height: 802 }, { width: 1000, height: 800 })).toEqual({ width: 1003, height: 802 })
+    expect(letterboxSize({ width: 1928, height: 1051 }, { width: 1920, height: 1040 })).toEqual({ width: 1928, height: 1044 })
+    expect(letterboxSize({ width: 1920, height: 1080 }, { width: 1000, height: 800 })).toEqual({ width: 1350, height: 1080 })
+    // A minimized or hidden window comes as a 1x1 picture: a square.
+    expect(letterboxSize({ width: 952, height: 1035 }, { width: 1, height: 1 })).toEqual({ width: 952, height: 952 })
+    expect(letterboxSize({ width: 100, height: 100 }, { width: 0, height: 0 })).toEqual({ width: 0, height: 0 })
+  })
+
+  it('asks for the picture at the size of the GDI region, or of the frame when that is all that is known', () => {
+    expect(captureSize({ frame, gdiRegion: rect(97, 51, 1006, 802), pages: [] })).toEqual({ width: 1006, height: 802 })
+    expect(captureSize({ frame, pages: [] })).toEqual({ width: 1000, height: 800 })
+  })
+
+  it('tells the two pictures apart by their size, and refuses when it cannot', () => {
+    const geometry = { frame, gdiRegion: gdiCaptureRegion(window, frame, thick, metrics), pages: [] }
+    const requested = captureSize(geometry)
+    expect(picturedRegion(geometry, requested, { width: 1006, height: 802 })).toEqual({ region: rect(97, 51, 1006, 802) })
+    expect(picturedRegion(geometry, requested, { width: 1003, height: 802 })).toEqual({ region: frame })
+    expect(picturedRegion(geometry, requested, { width: 1006, height: 1006 })).toEqual({ reason: 'the picture is not of the browser window as Windows reports it' })
+    expect(picturedRegion(geometry, requested, { width: 503, height: 401 })).toEqual({ reason: 'the picture is not of the browser window as Windows reports it' })
+    // Two parts of the window of the same size but in different places: which one is it?
+    expect(picturedRegion({ frame, gdiRegion: rect(103, 50, 1000, 800), pages: [] }, { width: 1000, height: 800 }, { width: 1000, height: 800 })).toEqual({ reason: 'it cannot be told which part of the browser window the picture shows' })
+  })
+
+  it('a restored window pictured by GDI: the page is placed in the GDI region, not the frame, so neither border nor browser bar is kept', () => {
+    const page = rect(100, 140, 760, 710)
+    const geometry = { frame, gdiRegion: gdiCaptureRegion(window, frame, thick, metrics), pages: [page, rect(860, 140, 240, 710)], dpi: 96 }
+    // 3 px of invisible border on the left of the picture, and the page starts 89 rows down (the region starts a row lower than the frame).
+    expect(pageCrop(geometry, { width: 1006, height: 802 })).toEqual({ method: 'page', rect: rect(3, 89, 760, 710), pictured: geometry.gdiRegion })
+  })
+
+  it('a maximized window pictured by GDI: the 7 rows above the screen are not mistaken for the page', () => {
+    const geometry = { frame: rect(0, 0, 1920, 1040), gdiRegion: gdiCaptureRegion(rect(-8, -8, 1936, 1056), rect(0, 0, 1920, 1040), thick, metrics), pages: [rect(0, 80, 1920, 960)], dpi: 96 }
+    expect(pageCrop(geometry, { width: 1928, height: 1051 })).toEqual({ method: 'page', rect: rect(4, 87, 1920, 960), pictured: rect(-4, -7, 1928, 1051) })
+  })
+
+  it('the frame pictured instead (Windows 11 falls back to Windows Graphics Capture), scaled to the size asked for: placed in the frame, a pixel inside', () => {
+    const geometry = { frame, gdiRegion: gdiCaptureRegion(window, frame, thick, metrics), pages: [rect(100, 140, 760, 710)], dpi: 96 }
+    // 1003x802 for a 1000x800 frame: the page's top at 90 is 90.2 rows down, so 91, and a row more for the blending of a scaled edge.
+    expect(pageCrop(geometry, { width: 1003, height: 802 })).toEqual({ method: 'page', rect: rect(1, 92, 760, 709), pictured: frame })
+  })
+
+  it('at a display scale that is not a whole multiple of 100 %, a pixel inside the page window (Chromium rounds it outwards)', () => {
+    const page = rect(100, 140, 760, 710)
+    const gdiRegion = gdiCaptureRegion(window, frame, thick, metrics)
+    expect(pageCrop({ frame, gdiRegion, pages: [page], dpi: 120 }, { width: 1006, height: 802 })).toMatchObject({ method: 'page', rect: rect(4, 90, 758, 708) })
+    expect(pageCrop({ frame, gdiRegion, pages: [page], dpi: 144 }, { width: 1006, height: 802 })).toMatchObject({ method: 'page', rect: rect(4, 90, 758, 708) })
+    expect(pageCrop({ frame, gdiRegion, pages: [page], dpi: 192 }, { width: 1006, height: 802 })).toMatchObject({ method: 'page', rect: rect(3, 89, 760, 710) })
+    expect(pageCrop({ frame, gdiRegion, pages: [page], dpi: null }, { width: 1006, height: 802 })).toMatchObject({ method: 'page', rect: rect(3, 89, 760, 710) })
+  })
+
+  it('keeps the whole picture when it is of neither part of the window, or the page does not fit in it', () => {
+    const geometry = { frame, gdiRegion: gdiCaptureRegion(window, frame, thick, metrics), pages: [rect(100, 140, 760, 710)] }
+    expect(pageCrop(geometry, { width: 1006, height: 1006 })).toEqual({ method: 'none', reason: 'the picture is not of the browser window as Windows reports it', pictured: null })
+    expect(pageCrop(geometry, { width: 1000, height: 800 })).toEqual({ method: 'none', reason: 'the picture is not of the browser window as Windows reports it', pictured: null })
+    expect(mapPageToPicture(frame, rect(100, 140, 2, 2), { width: 1000, height: 800 }, 1)).toEqual({ method: 'none', reason: 'the page is not in the picture' })
   })
 })
 
@@ -88,10 +169,10 @@ describe('which page window is the chart', () => {
     const chart = rect(0, 110, 1240, 890)
     const sidePanel = rect(1240, 110, 360, 890) // 20% of the window
     expect(choosePage({ frame, pages: [sidePanel, chart] })).toEqual({ page: chart })
-    expect(pageCrop({ frame, pages: [sidePanel, chart] }, { width: 1600, height: 1000 })).toEqual({ method: 'page', rect: chart })
+    expect(pageCrop({ frame, pages: [sidePanel, chart] }, { width: 1600, height: 1000 })).toEqual({ method: 'page', rect: chart, pictured: frame })
     // Vertical tabs on the left: the page window starts to the right of them.
     const vertical = rect(240, 80, 1360, 920)
-    expect(pageCrop({ frame, pages: [vertical] }, { width: 1600, height: 1000 })).toEqual({ method: 'page', rect: vertical })
+    expect(pageCrop({ frame, pages: [vertical] }, { width: 1600, height: 1000 })).toEqual({ method: 'page', rect: vertical, pictured: frame })
   })
 
   it('a page shown over the chart page (same place) is no reason to doubt it', () => {
@@ -119,7 +200,7 @@ describe('which page window is the chart', () => {
 
   it('a page within 2 px of rounding outside the frame is kept, clamped to it', () => {
     expect(choosePage({ frame, pages: [rect(-1, 110, 1602, 892)] })).toEqual({ page: rect(0, 110, 1600, 890) })
-    expect(pageCrop({ frame, pages: [rect(-2, 108, 1604, 894)] }, { width: 1600, height: 1000 })).toEqual({ method: 'page', rect: rect(0, 108, 1600, 892) })
+    expect(pageCrop({ frame, pages: [rect(-2, 108, 1604, 894)] }, { width: 1600, height: 1000 })).toEqual({ method: 'page', rect: rect(0, 108, 1600, 892), pictured: frame })
   })
 })
 
@@ -185,6 +266,8 @@ describe('finding the page windows (Windows, without callbacks)', () => {
       for (const reading of readings) {
         expect(reading.frame.width).toBeGreaterThan(0)
         expect(reading.frame.height).toBeGreaterThan(0)
+        expect(reading.window.width).toBeGreaterThanOrEqual(reading.frame.width)
+        expect(reading.gdiRegion!.width).toBeGreaterThan(0)
         expect(reading.pages).toEqual([])
       }
       expect(typeof windowGeometryApi()!.physicalPixels()).toBe('boolean')
@@ -196,7 +279,7 @@ describe('finding the page windows (Windows, without callbacks)', () => {
   })
 
   it('looks a source id up through the API, and says why when it cannot', () => {
-    const geometry = { frame: rect(0, 0, 1600, 1000), pages: [rect(0, 110, 1600, 890)], walked: 3 }
+    const geometry = { frame: rect(0, 0, 1600, 1000), window: rect(-7, 0, 1614, 1007), pages: [rect(0, 110, 1600, 890)], walked: 3 }
     const read: number[] = []
     let physical = true
     setWindowGeometryApiForTests({ read: (hwnd) => (read.push(hwnd), hwnd === 42 ? geometry : null), physicalPixels: () => physical })
@@ -208,6 +291,9 @@ describe('finding the page windows (Windows, without callbacks)', () => {
     expect(read).toEqual([42, 43])
     setWindowGeometryApiForTests({ read: () => { throw new Error('boom') }, physicalPixels: () => true })
     expect(lookUpWindowGeometry('window:42:0')).toEqual({ ok: false, reason: 'the browser window could not be read (boom)' })
+    // A failing DPI-awareness query is no crash either: the whole window is kept.
+    setWindowGeometryApiForTests({ read: () => geometry, physicalPixels: () => { throw new Error('no context') } })
+    expect(lookUpWindowGeometry('window:42:0')).toEqual({ ok: false, reason: 'the browser window could not be read (no context)' })
   })
 })
 
@@ -257,20 +343,52 @@ describe('the snapshot keeps the page of the chart window', () => {
     expect(result.from).toBe('window')
     expect(ctx.asked[1]!.thumbnailSize).toEqual({ width: 1000, height: 800 })
     expect(asFake(result.image)).toMatchObject({ width: 760, height: 710, croppedTo: rect(0, 90, 760, 710) })
-    expect(result.crop).toEqual({ method: 'page', reason: null, rect: rect(0, 90, 760, 710), picture: { width: 1000, height: 800 }, frame: geometry.frame, pages: geometry.pages })
+    expect(result.crop).toEqual({
+      method: 'page',
+      reason: null,
+      rect: rect(0, 90, 760, 710),
+      picture: { width: 1000, height: 800 },
+      requested: { width: 1000, height: 800 },
+      pictured: geometry.frame,
+      frame: geometry.frame,
+      gdiRegion: null,
+      pages: geometry.pages,
+      dpi: null
+    })
   })
 
-  it('maps into a picture of another size', async () => {
+  it('asks for the picture at the GDI region’s size, and places the page in it', async () => {
+    const geometry = { frame: rect(100, 50, 1000, 800), gdiRegion: rect(97, 51, 1006, 802), pages: [rect(100, 140, 760, 710)], dpi: 96 }
+    const ctx = context(geometry, { width: 1006, height: 802 })
+    const result = await captureChart(ctx)
+    expect(ctx.asked[1]!.thumbnailSize).toEqual({ width: 1006, height: 802 })
+    expect(result.ok && asFake(result.image)).toMatchObject({ width: 760, height: 710, croppedTo: rect(3, 89, 760, 710) })
+    expect(result.ok && result.crop).toMatchObject({ method: 'page', pictured: rect(97, 51, 1006, 802), gdiRegion: rect(97, 51, 1006, 802), dpi: 96 })
+  })
+
+  it('keeps a picture whole when it is not of the size asked for (not the window as read)', async () => {
     const geometry = { frame: rect(100, 50, 1000, 800), pages: [rect(100, 140, 760, 710)] }
     const result = await captureChart(context(geometry, { width: 500, height: 400 }))
-    expect(result.ok && asFake(result.image)).toMatchObject({ width: 380, height: 355, croppedTo: rect(0, 45, 380, 355) })
+    expect(result.ok && asFake(result.image)).toMatchObject({ width: 500, height: 400, croppedTo: null })
+    expect(result.ok && result.crop).toMatchObject({ method: 'none', reason: 'the picture is not of the browser window as Windows reports it', requested: { width: 1000, height: 800 } })
   })
 
   it('keeps the whole window, as before, when the page cannot be found', async () => {
     const ctx = context(null, { width: 1600, height: 900 })
     const result = await captureChart(ctx)
     expect(result.ok && asFake(result.image)).toMatchObject({ width: 1600, height: 900, croppedTo: null })
-    expect(result.ok && result.crop).toEqual({ method: 'none', reason: 'the page is only found on Windows', rect: null, picture: { width: 1600, height: 900 }, frame: null, pages: [] })
+    expect(result.ok && result.crop).toEqual({
+      method: 'none',
+      reason: 'the page is only found on Windows',
+      rect: null,
+      picture: { width: 1600, height: 900 },
+      requested: null,
+      pictured: null,
+      frame: null,
+      gdiRegion: null,
+      pages: [],
+      dpi: null
+    })
     // The picture is then asked for at the largest display's size, as before.
     expect(ctx.asked[1]!.thumbnailSize).toEqual({ width: 1920, height: 1080 })
     const implausible = await captureChart(context({ frame: rect(0, 0, 1600, 900), pages: [rect(0, 0, 200, 200)] }, { width: 1600, height: 900 }))
@@ -280,9 +398,11 @@ describe('the snapshot keeps the page of the chart window', () => {
 
   it('a full-screen page is kept as captured, without a crop', () => {
     const picture = image(1920, 1080)
-    const { image: kept, crop } = cropToPage(picture, { ok: true, geometry: { frame: rect(0, 0, 1920, 1080), pages: [rect(0, 0, 1920, 1080)] } })
+    const { image: kept, crop } = cropToPage(picture, { ok: true, geometry: { frame: rect(0, 0, 1920, 1080), gdiRegion: rect(0, 0, 1920, 1080), pages: [rect(0, 0, 1920, 1080)], dpi: 96 } }, { width: 1920, height: 1080 })
     expect(kept).toBe(picture)
     expect(crop).toMatchObject({ method: 'page', rect: rect(0, 0, 1920, 1080) })
+    // Without the size it was asked for, nothing can be placed in a picture.
+    expect(cropToPage(picture, { ok: true, geometry: { frame: rect(0, 0, 1920, 1080), pages: [rect(0, 0, 1920, 1080)] } }, null).crop).toMatchObject({ method: 'none' })
   })
 
   it('the display under the pointer is never cut to a page', async () => {
