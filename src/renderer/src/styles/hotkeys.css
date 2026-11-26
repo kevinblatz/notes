@@ -1,0 +1,418 @@
+/* The trading hotkeys: quick note strip, risk calculator, candle timer chip, Settings rows.
+   Loaded after app.css and uses its design tokens. */
+
+/* ------------------------------------------------------------------ the layer under the title bar */
+
+/* Above the board, the editor and sheets (60); under popovers (100) and toasts (110). The title
+   bar stays uncovered: the window can still be moved, hidden or minimised. */
+.capture-layer {
+  position: fixed;
+  inset: 32px 0 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3px 12px 12px;
+  background: color-mix(in srgb, var(--ground) 62%, transparent);
+  animation: fade-in 110ms linear;
+}
+/* The image preview covers the whole window (120, title bar included): the panel the
+   keyboard is in must still be seen, so it goes over the preview while that is open. */
+.preview-layer ~ .capture-layer {
+  z-index: 125;
+}
+.capture-card {
+  width: min(1080px, 100%);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  animation: capture-in 150ms var(--ease);
+}
+@keyframes capture-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.capture-keys {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.capture-keys kbd {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+}
+.capture-keys-sep {
+  padding: 0 2px;
+}
+.capture-error {
+  margin: 0;
+  padding: 7px 14px 9px;
+  border-top: 1px solid var(--line);
+  color: var(--danger);
+  font-size: 12.5px;
+}
+
+/* ------------------------------------------------------------------ quick note */
+
+/* A strip across the whole window, flush under the title bar: nothing of the note's own
+   header (Back, Log note) peeks out around it. */
+.capture-layer:has(.quick-note) {
+  padding: 0 0 12px;
+}
+.capture-card:has(.quick-note) {
+  width: 100%;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.quick-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 12px 0 14px;
+}
+.quick-note-icon {
+  flex: none;
+  color: var(--accent);
+}
+.quick-note-time {
+  flex: none;
+  color: var(--ink-faint);
+  font: 500 12px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.quick-note-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+  font-family: var(--note-font);
+  font-size: 15.5px;
+  user-select: text;
+}
+.quick-note-input::placeholder {
+  color: var(--ink-faint);
+}
+.quick-note-input[readonly] {
+  color: var(--ink-soft);
+}
+/* At narrow widths the key hint gives up its words first, then itself. */
+@media (max-width: 760px) {
+  .quick-note .capture-keys {
+    font-size: 0;
+    gap: 6px;
+  }
+  .quick-note .capture-keys kbd {
+    font-size: 11px;
+  }
+}
+
+/* ------------------------------------------------------------------ risk calculator */
+
+.capture-card:has(.risk) {
+  width: min(480px, 100%);
+}
+.risk {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px 11px;
+}
+.risk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.risk-title {
+  font-weight: 650;
+}
+.risk-instrument {
+  margin: 6px 0 10px;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+.risk-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+.risk-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.risk-label,
+.risk-prices-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+.risk-input {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 10px;
+  background: var(--ground);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+.risk-input:focus-within {
+  border-color: var(--accent);
+}
+.risk-affix {
+  color: var(--ink-faint);
+  margin-right: 3px;
+}
+.risk-input input,
+.risk-price {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+}
+.risk-input input[aria-invalid='true'] {
+  color: var(--danger);
+}
+.risk-unit .segmented {
+  height: 34px;
+  align-items: stretch;
+}
+.risk-unit .segmented button {
+  padding: 0 10px;
+}
+.risk-prices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.risk-prices-label {
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+.risk-price {
+  width: 96px;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 13px;
+}
+.risk-price:focus {
+  border-color: var(--accent);
+}
+.risk-note {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+.is-warning {
+  color: var(--danger);
+}
+.risk-result {
+  margin-top: 12px;
+  padding: 10px 12px 11px;
+  border-radius: 9px;
+  background: var(--accent-wash);
+}
+.risk-result.is-zero {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.risk-contracts {
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.risk-result.is-zero .risk-contracts {
+  color: var(--danger);
+}
+.risk-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-top: 4px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.risk-detail strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.risk-sep {
+  color: var(--ink-faint);
+}
+.risk-result .risk-note {
+  margin-top: 4px;
+}
+.risk-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* ------------------------------------------------------------------ candle timer chip */
+
+.candle-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+}
+.candle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition:
+    color 160ms var(--ease),
+    border-color 160ms var(--ease),
+    background-color 160ms var(--ease);
+}
+.candle-chip:hover,
+.candle-chip[aria-expanded='true'] {
+  color: var(--ink);
+  background: var(--line);
+}
+.candle-frame {
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+.candle-time {
+  min-width: 4ch;
+  color: var(--ink);
+  font-weight: 600;
+  text-align: right;
+}
+/* The last ten seconds of a candle. */
+.candle-chip.is-urgent {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-wash);
+}
+.candle-chip.is-urgent .candle-time,
+.candle-chip.is-urgent .candle-frame {
+  color: var(--accent);
+}
+.candle-chip.is-pulsing {
+  animation: candle-pulse 900ms var(--ease);
+}
+@keyframes candle-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+.popover.candle-popover .menu {
+  min-width: 168px;
+}
+
+/* ------------------------------------------------------------------ Settings */
+
+.hotkey-intro {
+  margin: 2px 0 6px;
+}
+.hotkey-list {
+  display: flex;
+  flex-direction: column;
+}
+.hotkey-row {
+  padding: 7px 0;
+}
+.hotkey-row + .hotkey-row {
+  border-top: 1px solid var(--line);
+}
+.hotkey-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hotkey-text {
+  flex: 1;
+  min-width: 0;
+}
+.hotkey-keys {
+  min-width: 112px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.hotkey-keys:hover:not(.is-recording) {
+  background: var(--line);
+}
+.hotkey-keys.is-failing {
+  border-color: color-mix(in srgb, var(--danger) 60%, transparent);
+}
+.hotkey-row.is-off .hotkey-keys:not(.is-recording) {
+  color: var(--ink-faint);
+  border-style: dashed;
+}
+.hotkey-row.is-off .setting-label {
+  color: var(--ink-soft);
+}
+.hotkey-row .setting-warning,
+.hotkey-row p.setting-help {
+  margin: 7px 0 2px;
+}
+.money-input {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 3px;
+  padding: 0 9px;
+  height: 30px;
+  background: var(--ground);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--ink-faint);
+}
+.money-input:focus-within {
+  border-color: var(--accent);
+}
+.money-input input {
+  width: 72px;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+}
+
+@media (max-width: 520px) {
+  .hotkey-keys {
+    min-width: 0;
+  }
+}

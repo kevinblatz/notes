@@ -1,0 +1,341 @@
+/* Styles for the drawing space (Draw button in the format bar). Loaded after app.css and uses its design tokens. */
+
+/* ------------------------------------------------------------------ format bar: fold away */
+
+/* The bar sits in a drawer that folds to nothing; the editor above gets the room. */
+.format-dock {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 200ms var(--ease);
+}
+.format-dock.is-collapsed {
+  grid-template-rows: 0fr;
+}
+.format-dock-inner {
+  min-height: 0;
+  overflow: hidden;
+  transition: visibility 0s;
+}
+.format-dock.is-collapsed .format-dock-inner {
+  visibility: hidden;
+  transition: visibility 0s 200ms;
+}
+[data-motion='reduce'] .format-dock.is-collapsed .format-dock-inner {
+  transition-delay: 0s;
+}
+.format-dock .format-bar {
+  transition:
+    opacity 160ms var(--ease),
+    transform 200ms var(--ease);
+}
+.format-dock.is-collapsed .format-bar {
+  opacity: 0;
+  transform: translateY(8px);
+}
+/* Room for the Draw and Organize buttons at half-screen widths (680 px) without wrapping onto
+   a second line: tighter gaps, and the style and font menus a little narrower until they
+   name something longer. */
+@media (max-width: 760px) {
+  .format-bar {
+    column-gap: 5px;
+    padding-inline: 6px;
+  }
+  .format-bar .bar-dropdown {
+    padding: 0 4px 0 7px;
+  }
+  .format-bar .bar-dropdown[aria-label='Paragraph style'] {
+    min-width: 72px !important;
+  }
+  .format-bar .bar-dropdown[aria-label='Font'] {
+    min-width: 62px !important;
+  }
+}
+
+/* The drawer's handle: a small tab standing on the bar's top edge, clear of its buttons. It
+   rides down with the bar and stays on the bottom edge of the window when the bar is away. */
+.format-fold {
+  position: absolute;
+  right: 18px;
+  bottom: calc(100% - 1px);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 17px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: var(--ground);
+  color: var(--ink-faint);
+  transition:
+    color 110ms var(--ease),
+    background-color 110ms var(--ease),
+    border-color 110ms var(--ease);
+}
+.format-fold:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.format-fold:focus-visible {
+  outline-offset: 0;
+}
+.format-dock.is-collapsed .format-fold {
+  border-color: var(--line-strong);
+}
+
+/* ------------------------------------------------------------------ image controls */
+
+.image-edit {
+  position: absolute;
+  top: 8px;
+  right: 40px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ground) 82%, transparent);
+  color: var(--ink);
+  opacity: 0;
+  transition: opacity 110ms var(--ease);
+}
+.image-node:hover .image-edit,
+.image-node.is-selected .image-edit,
+.image-edit:focus-visible {
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------------ drawing space */
+
+.draw-layer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* top: set inline, just under the title bar */
+  z-index: 58;
+  overflow: hidden;
+  background: var(--sheet);
+  border-top: 1px solid var(--line);
+  outline: none;
+  user-select: none;
+  animation: draw-in 140ms var(--ease);
+}
+@keyframes draw-in {
+  from {
+    opacity: 0;
+  }
+}
+/* An edited drawing comes in together with its picture and its own sheet colour, not before. */
+.draw-layer.is-loading,
+.draw-layer.is-loading .draw-toolbar {
+  animation: none;
+}
+.draw-layer.is-loading {
+  opacity: 0;
+}
+
+.draw-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.draw-input {
+  touch-action: none;
+  cursor: crosshair;
+}
+.draw-layer.is-busy .draw-input {
+  cursor: progress;
+}
+
+.draw-hint {
+  position: absolute;
+  inset: 0 0 64px;
+  display: grid;
+  place-content: center;
+  margin: 0;
+  color: var(--ink-faint);
+  font: 400 1.15rem/1.4 var(--note-font);
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 160ms var(--ease);
+}
+.draw-hint span {
+  display: block;
+  margin-top: 6px;
+  font: 400 12.5px/1.4 var(--font-sans);
+  opacity: 0.85;
+}
+.draw-layer.is-inking .draw-hint {
+  opacity: 0;
+}
+
+.draw-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 5px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  animation: draw-tools-in 200ms var(--ease);
+  transition: opacity 140ms var(--ease);
+}
+@keyframes draw-tools-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+/* Ink coming close: the toolbar steps out of the way until the stroke ends. */
+.draw-layer.is-near-tools .draw-toolbar {
+  opacity: 0.12;
+  pointer-events: none;
+}
+
+.draw-divider {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 5px;
+  background: var(--line-strong);
+}
+
+.draw-swatches,
+.draw-sizes {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.draw-swatch {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 28px;
+  border-radius: 6px;
+}
+.draw-swatch::before {
+  content: '';
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  transition: transform 110ms var(--ease);
+}
+.draw-swatch:hover::before {
+  transform: scale(1.12);
+}
+.draw-swatch[aria-checked='true']::before {
+  box-shadow:
+    0 0 0 2px var(--raised),
+    0 0 0 3.5px var(--accent);
+}
+/* While erasing, the colours wait in the background. */
+.draw-swatches.is-idle .draw-swatch[aria-checked='true']::before {
+  box-shadow:
+    0 0 0 2px var(--raised),
+    0 0 0 3.5px var(--line-strong);
+}
+
+.draw-size {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--ink-faint);
+}
+.draw-size span {
+  border-radius: 50%;
+  background: currentColor;
+}
+.draw-size:hover {
+  color: var(--ink);
+  background: var(--line);
+}
+.draw-size[aria-checked='true'] {
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.draw-toolbar .ghost-button {
+  height: 28px;
+  padding: 0 10px;
+}
+.draw-toolbar .primary-button {
+  height: 28px;
+  margin-left: 2px;
+  padding: 0 10px 0 12px;
+}
+.draw-toolbar .primary-button:disabled {
+  opacity: 0.7;
+}
+@media (max-width: 760px) {
+  .draw-done kbd {
+    display: none;
+  }
+}
+/* Too narrow for one row: the groups wrap and are told apart by space instead of rules. */
+@media (max-width: 600px) {
+  .draw-toolbar {
+    gap: 4px 10px;
+  }
+  .draw-divider {
+    display: none;
+  }
+}
+
+/* Asked before anything drawn is thrown away. */
+.draw-confirm-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--scrim);
+  animation: fade-in 110ms linear;
+}
+.draw-confirm {
+  width: min(340px, 100%);
+  padding: 16px 16px 14px 18px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  animation: pop-in 120ms var(--ease);
+}
+.draw-confirm h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 680;
+}
+.draw-confirm p {
+  margin: 0 0 14px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.draw-confirm .button-row {
+  justify-content: flex-end;
+}
+
+/* Nothing else in the window opens on top of a drawing in progress. */
+body:has(.draw-layer) .titlebar [data-testid='gear'] {
+  pointer-events: none;
+  opacity: 0.35;
+}

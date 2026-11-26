@@ -1,0 +1,163 @@
+/* Spelling underlines, the Organize button and its highlight, and the Spelling settings. Loaded after app.css and uses its design tokens. */
+
+/* ------------------------------------------------------------------ underlines */
+
+/* A soft wavy line in the theme's own warning colour: visible, never shouting. */
+:root {
+  --spell-line: color-mix(in srgb, var(--danger) 82%, transparent);
+}
+[data-theme='paper'] {
+  --spell-line: color-mix(in srgb, var(--danger) 72%, transparent);
+}
+
+.spell-miss {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--spell-line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  text-decoration-skip-ink: none;
+}
+
+/*
+ * A text field (title, caption, quick note, tag) cannot draw underlines inside itself: a
+ * transparent copy of its text lies exactly over it (SpellInput.tsx sets its box, font and line
+ * breaks from the field), showing only the wavy lines.
+ */
+.spell-field {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+/* Clipped at the field's sides only: the wavy line may hang just below the field's box. */
+.spell-mirror {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  overflow-x: clip;
+  overflow-y: visible;
+  margin: 0;
+  border-color: transparent;
+  background: none;
+  color: transparent;
+  white-space: pre;
+  pointer-events: none;
+  user-select: none;
+}
+.spell-mirror-text {
+  white-space: pre;
+}
+/*
+ * In the copy, the wave is drawn as a background of each word, line by line, not as a text
+ * decoration: a selection around the field (a picture picked in the note selects its caption's
+ * copy too) repaints the text and its decorations in the selection's colours, which would make
+ * the wave as transparent as the copy's text. A background is left as it is.
+ */
+.spell-mirror .spell-miss {
+  text-decoration: none;
+  /* The wave's bottom edge: 0.2em under the baseline plus its own height (SpellInput.tsx measures it per font). */
+  padding-bottom: var(--spell-drop, 0.12em);
+  background-color: var(--spell-line);
+  -webkit-mask: var(--spell-wave) left bottom / 6px 3px repeat-x;
+  mask: var(--spell-wave) left bottom / 6px 3px repeat-x;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.spell-mirror ::selection {
+  color: transparent;
+  background-color: transparent;
+}
+:root {
+  --spell-wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.5C1.5 2.5 1.5 0.5 3 0.5S4.5 2.5 6 2.5' fill='none' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E");
+}
+/* A field that wraps (the title, captions): the copy wraps the same way, line for line. */
+.spell-field.is-wrapping .spell-mirror {
+  display: block;
+  white-space: pre-wrap;
+}
+.spell-field.is-wrapping .spell-mirror-text {
+  display: block;
+  white-space: inherit;
+}
+.quick-note-field {
+  display: flex;
+  flex: 1;
+}
+.quick-note-field .quick-note-input {
+  width: 100%;
+}
+
+/* ------------------------------------------------------------------ Organize */
+
+/* The wand gives a small flourish when pressed: a tilt and a spring back. */
+.organize-button.is-flourish > svg {
+  animation: wand-flourish 520ms cubic-bezier(0.3, 1.5, 0.45, 1);
+}
+@keyframes wand-flourish {
+  0% {
+    transform: rotate(0) scale(0.8);
+  }
+  35% {
+    transform: rotate(-18deg) scale(1.12);
+  }
+  100% {
+    transform: rotate(0) scale(1);
+  }
+}
+
+/* Words Organize changed glow briefly in the accent colour, then settle (under a second). */
+.organize-flash {
+  border-radius: 3px;
+  animation: organize-flash 900ms var(--ease) both;
+}
+@keyframes organize-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--accent) 38%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 38%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+[data-motion='reduce'] .organize-flash {
+  animation: none;
+}
+
+/* Suggestions at the top of the right-click menu read first, as in a native menu. */
+.menu-item.is-strong .menu-text {
+  font-weight: 650;
+}
+
+/* ------------------------------------------------------------------ settings */
+
+.word-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 6px;
+  padding: 0;
+  list-style: none;
+}
+.word-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+.word-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--ink-faint);
+}
+.word-chip button:hover {
+  color: var(--ink);
+  background: var(--line);
+}

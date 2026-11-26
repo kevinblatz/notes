@@ -1,0 +1,58 @@
+# Packaging for Windows. Build with:  npm run package:win
+appId: com.tradingnotes.app
+productName: Trading Notes
+copyright: Trading Notes
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - "!out/**/*.map"
+  - resources/**/*
+  - package.json
+  # koffi is the one runtime dependency shipped in node_modules (see electron.vite.config.mts).
+  # Its C++ sources, headers and documentation are not needed to run it.
+  - "!**/node_modules/koffi/src/**/*.{cc,hh,h,asm,S,def,txt}"
+  - "!**/node_modules/koffi/{vendor,lib,doc}/**"
+  - "!**/node_modules/koffi/{cnoke.cjs,CHANGELOG.md,README.md}"
+  - "!**/node_modules/@koromix/*/*.{lib,md}"
+asar: true
+asarUnpack:
+  # The tray and window icons are read by Windows from a real file path.
+  - resources/**
+  # A native module is loaded by Windows from a real file path.
+  - "**/node_modules/@koromix/**/*.node"
+# Everything else the app needs is bundled into out/. Nothing native is rebuilt: SQLite is built
+# into Electron and koffi ships a prebuilt Node-API module.
+npmRebuild: false
+# Hardening: the packaged executable cannot be turned into a general-purpose Node runtime or
+# be attached to with a debugger from the command line, and it only loads its own code.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: true
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Trading Notes
+  uninstallDisplayName: Trading Notes
+  runAfterFinish: true
+  # Uninstalling the app must never delete the notes.
+  deleteAppDataOnUninstall: false
+  artifactName: Trading-Notes-Setup-${version}.${ext}
+portable:
+  artifactName: Trading-Notes-Portable-${version}.${ext}
+publish: null

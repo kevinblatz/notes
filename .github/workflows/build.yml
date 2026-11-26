@@ -1,0 +1,133 @@
+name: Build and test
+
+# Builds the Windows installer and portable app on a real Windows machine, runs every test
+# there, and runs the native window checks (always-on-top, focus, shortcut) that cannot be
+# verified anywhere else. The installer and portable .exe are attached to each run.
+#
+# To publish downloadable files: run this workflow by hand with "Create a release" ticked
+# (Actions tab, Build and test, Run workflow), or push a tag such as v0.1.0. The release is
+# a draft unless "Publish" is ticked as well.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      draft_release:
+        description: Create a release with the installer and portable app
+        type: boolean
+        default: false
+      publish:
+        description: Publish the release straight away (otherwise it stays a draft)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows build, tests and native checks
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use a full-size desktop
+        shell: pwsh
+        run: |
+          try { Set-DisplayResolution -Width 1920 -Height 1080 -Force } catch { Write-Host "Could not change resolution: $_" }
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests (persistence, backup, layout)
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Package installer and portable app
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Upload installer and portable app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trading-Notes-Windows
+          path: |
+            release/Trading-Notes-Setup-*.exe
+            release/Trading-Notes-Portable-*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Native window checks (always-on-top, focus, shortcut)
+        shell: pwsh
+        run: ./scripts/windows-native-check.ps1 -AppExe "release/win-unpacked/Trading Notes.exe" -OutDir native-check
+
+      - name: Upload native check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-window-check
+          path: native-check/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Desktop tests on Windows
+        run: npx playwright test
+
+      - name: Upload failed desktop test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  release:
+    name: Release
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.draft_release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: Trading-Notes-Windows
+          path: release
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag="$GITHUB_REF_NAME"; else tag="v$version"; fi
+          notes="Windows builds of Trading Notes $version. Use the Setup file for a normal install, or the Portable file to run without installing. The app is not code-signed, so Windows SmartScreen may ask for confirmation: choose More info, then Run anyway."
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Trading Notes $version" --notes "$notes"
+          fi
+          gh release upload "$tag" release/*.exe --clobber
+          if [[ "$PUBLISH" == "true" ]]; then gh release edit "$tag" --draft=false --latest; fi
